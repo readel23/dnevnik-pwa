@@ -79,27 +79,15 @@ button {
   touch-action: manipulation;
 }
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
+button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 72%, white);
   outline-offset: 3px;
 }
 
-.skip-link {
-  position: fixed;
-  z-index: 2000;
-  top: 10px;
-  left: 10px;
-  transform: translateY(-160%);
-  border-radius: 12px;
-  background: var(--text);
-  color: var(--bg);
-  padding: 10px 14px;
-}
-
-.skip-link:focus {
-  transform: none;
+input:focus,
+textarea:focus {
+  outline: 0;
+  box-shadow: none;
 }
 
 .visually-hidden {
@@ -268,6 +256,9 @@ textarea:focus-visible {
   padding: 0 18px;
   text-align: left;
   transition: background 160ms ease, transform 140ms ease;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .subsection-row:hover,
@@ -467,10 +458,15 @@ textarea:focus-visible {
   align-items: center;
   gap: 5px;
   min-height: 92px;
-  margin: calc(max(24px, env(safe-area-inset-top)) * -1) -12px 18px;
-  padding: max(24px, env(safe-area-inset-top)) 12px 12px;
+  width: 100vw;
+  margin: calc(max(24px, env(safe-area-inset-top)) * -1) 0 18px calc(50% - 50vw);
+  padding:
+    max(24px, env(safe-area-inset-top))
+    max(16px, calc((100vw - 820px) / 2 + 24px))
+    12px;
   background: color-mix(in srgb, var(--bg) 84%, transparent);
-  backdrop-filter: blur(22px);
+  box-shadow: 0 1px var(--divider);
+  backdrop-filter: blur(22px) saturate(135%);
 }
 
 .breadcrumbs {
@@ -508,9 +504,11 @@ textarea:focus-visible {
 
 .swipe-wrap {
   position: relative;
+  isolation: isolate;
   overflow: hidden;
   border-radius: 27px;
-  background: var(--surface-soft);
+  background: transparent;
+  transition: transform 220ms cubic-bezier(.16, 1, .3, 1), box-shadow 220ms ease;
 }
 
 .swipe-action {
@@ -523,6 +521,13 @@ textarea:focus-visible {
   color: white;
   font-size: 0.76rem;
   text-align: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.swiping-left .archive-action,
+.swiping-right .delete-action {
+  opacity: 1;
 }
 
 .archive-action {
@@ -541,9 +546,22 @@ textarea:focus-visible {
   min-height: 190px;
   border-radius: 27px;
   padding: 24px 26px 27px;
+  background: var(--surface-strong);
   touch-action: pan-y;
   transition: transform 210ms cubic-bezier(.16, 1, .3, 1);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
+}
+
+.swipe-wrap.dragging {
+  z-index: 8;
+  transform: scale(1.018);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.38);
+}
+
+.swipe-wrap.dragging .note-block {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
 .note-meta {
@@ -558,10 +576,11 @@ textarea:focus-visible {
   text-transform: uppercase;
 }
 
-.drag-handle {
-  margin: -9px -11px -6px 0;
-  cursor: grab;
-  touch-action: none;
+.hold-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0.68;
 }
 
 .is-reordering,
@@ -713,24 +732,53 @@ textarea:focus-visible {
 
 .bottom-sheet {
   width: min(100%, 820px);
-  max-height: calc(100dvh - 24px);
-  overflow-y: auto;
+  height: min(64dvh, 560px);
+  overflow: hidden;
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 28px 28px 0 0;
   background: var(--bg-elevated);
-  padding: 8px 20px max(28px, calc(env(safe-area-inset-bottom) + 18px));
   box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.3);
   animation: sheet-in 260ms cubic-bezier(.16, 1, .3, 1);
+  transition:
+    height 300ms cubic-bezier(.16, 1, .3, 1),
+    transform 180ms cubic-bezier(.16, 1, .3, 1);
+  will-change: height, transform;
+}
+
+.bottom-sheet.expanded {
+  height: calc(100dvh - max(8px, env(safe-area-inset-top)));
+}
+
+.sheet-scroll {
+  height: calc(100% - 29px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 20px max(28px, calc(env(safe-area-inset-bottom) + 18px));
+  -webkit-overflow-scrolling: touch;
+}
+
+.sheet-form {
+  min-height: 100%;
 }
 
 .sheet-handle {
+  display: block;
   width: 38px;
   height: 5px;
-  margin: 2px auto 3px;
   border-radius: 999px;
   background: var(--text-tertiary);
   opacity: 0.7;
+}
+
+.sheet-drag-zone {
+  display: grid;
+  width: 100%;
+  height: 29px;
+  place-items: center;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
 }
 
 .sheet-header {
@@ -774,6 +822,8 @@ textarea {
   border-radius: 15px;
   background: var(--surface-soft);
   padding: 13px 14px;
+  caret-color: var(--accent-strong);
+  -webkit-appearance: none;
 }
 
 input {
@@ -789,7 +839,6 @@ textarea {
 .editor-fields input {
   margin-bottom: 10px;
   border: 0;
-  border-bottom: 1px solid var(--divider);
   border-radius: 0;
   background: transparent;
   padding-inline: 0;
@@ -801,6 +850,222 @@ textarea {
   border: 0;
   background: transparent;
   padding-inline: 0;
+  resize: none;
+}
+
+.panel-header span:last-child {
+  min-width: 44px;
+}
+
+.panel-body,
+.auth-panel {
+  padding-bottom: 20px;
+}
+
+.panel-body {
+  display: grid;
+  gap: 18px;
+  padding-top: 22px;
+}
+
+.panel-copy,
+.help-list p,
+.about-panel p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.account-card,
+.plan-card {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface-soft);
+  padding: 18px;
+}
+
+.compact-avatar {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+}
+
+.account-card > div,
+.plan-card > div {
+  display: grid;
+  min-width: 0;
+}
+
+.account-card strong,
+.plan-card strong {
+  font-size: 1.1rem;
+}
+
+.account-card span,
+.plan-card span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+}
+
+.wide-button {
+  width: 100%;
+}
+
+.toggle-list,
+.choice-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface-soft);
+}
+
+.toggle-row,
+.choice-row {
+  display: flex;
+  width: 100%;
+  min-height: 62px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--divider);
+  background: transparent;
+  padding: 0 17px;
+  text-align: left;
+}
+
+.toggle-row:last-child,
+.choice-row:last-of-type {
+  border-bottom: 0;
+}
+
+.toggle {
+  position: relative;
+  width: 50px;
+  height: 30px;
+  border-radius: 99px;
+  background: var(--text-tertiary);
+  transition: background 180ms ease;
+}
+
+.toggle > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.26);
+  transition: transform 190ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.toggle.on {
+  background: var(--success);
+}
+
+.toggle.on > span {
+  transform: translateX(20px);
+}
+
+.choice-row.selected {
+  color: var(--accent-strong);
+  font-weight: 650;
+}
+
+.choice-check {
+  color: var(--success);
+}
+
+.choice-list .panel-copy {
+  padding: 16px;
+  border-top: 1px solid var(--divider);
+  font-size: 0.88rem;
+}
+
+.help-list {
+  display: grid;
+  gap: 12px;
+}
+
+.about-panel {
+  display: grid;
+  justify-items: center;
+  padding: 12px 12px 24px;
+  text-align: center;
+}
+
+.about-panel h2 {
+  margin: 16px 0 6px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 18px 0;
+  border-radius: 14px;
+  background: var(--surface-soft);
+  padding: 4px;
+}
+
+.auth-tabs button {
+  min-height: 42px;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.auth-tabs button.active {
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+.config-note,
+.form-error {
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 0.88rem;
+}
+
+.config-note {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+.auth-fields {
+  display: grid;
+  gap: 13px;
+  padding-top: 18px;
+}
+
+.auth-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 620;
+}
+
+.auth-fields input {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 450;
+}
+
+.form-error {
+  margin: 0;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .modal-layer.centered {
@@ -1003,8 +1268,20 @@ textarea {
     padding: 20px 21px 24px;
   }
 
-  .bottom-sheet {
+  .sheet-scroll {
     padding-inline: 14px;
+  }
+
+  .hold-hint {
+    width: 18px;
+    overflow: hidden;
+    gap: 0;
+    font-size: 0;
+    white-space: nowrap;
+  }
+
+  .hold-hint svg {
+    flex: 0 0 18px;
   }
 
   .sheet-header strong {
@@ -1025,7 +1302,7 @@ textarea {
   }
 
   .bottom-sheet {
-    max-height: 94dvh;
+    height: 88dvh;
   }
 }
 

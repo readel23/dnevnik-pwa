@@ -3,10 +3,13 @@
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react";
+import type { User } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabase } from "./supabase";
 
 type IconName =
   | "plus" | "user" | "more" | "chevron" | "back" | "checklist"
@@ -138,6 +141,26 @@ const initialData: AppData = {
 const storageKey = "diary-pwa-state-v1";
 const themes = ["dark", "light", "system"] as const;
 type Theme = typeof themes[number];
+type ProfilePanel = "account" | "subscription" | "notifications" | "privacy" | "language" | "help" | "about";
+type Preferences = {
+  haptics: boolean;
+  reminders: boolean;
+  dailySummary: boolean;
+  hidePreviews: boolean;
+  language: "ru" | "en" | "kk";
+};
+
+const defaultPreferences: Preferences = {
+  haptics: true,
+  reminders: false,
+  dailySummary: false,
+  hidePreviews: false,
+  language: "ru",
+};
+
+function vibrate(pattern: number | number[] = 18) {
+  if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+}
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -163,21 +186,40 @@ export default function DiaryApp() {
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [sheetSectionId, setSheetSectionId] = useState<string | null>(null);
+  const [profilePanel, setProfilePanel] = useState<ProfilePanel | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
+  const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressedRef = useRef(false);
   const dragRef = useRef<{ index: number; pointerId: number } | null>(null);
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage hydration is intentionally client-only. */
     try {
       const saved = localStorage.getItem(storageKey);
       const savedTheme = localStorage.getItem(`${storageKey}-theme`) as Theme | null;
+      const savedPreferences = localStorage.getItem(`${storageKey}-preferences`);
       if (saved) setData(JSON.parse(saved));
       if (savedTheme && themes.includes(savedTheme)) setTheme(savedTheme);
+      if (savedPreferences) setPreferences({ ...defaultPreferences, ...JSON.parse(savedPreferences) });
     } catch {
       setData(initialData);
     }
     setHydrated(true);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data: sessionData }) => {
+      setAuthUser(sessionData.session?.user ?? null);
+    });
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => subscription.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -194,6 +236,11 @@ export default function DiaryApp() {
   }, [theme, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(`${storageKey}-preferences`, JSON.stringify(preferences));
+  }, [preferences, hydrated]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 3200);
     return () => clearTimeout(timer);
@@ -201,6 +248,19 @@ export default function DiaryApp() {
 
   const section = active ? data.sections.find((item) => item.id === active.sectionId) : undefined;
   const subsection = active ? section?.subsections.find((item) => item.id === active.subsectionId) : undefined;
+  const displayName = authUser?.user_metadata?.full_name || "Гость";
+  const displayUsername = authUser?.user_metadata?.username
+    ? `@${authUser.user_metadata.username}`
+    : authUser?.email || "Войдите или зарегистрируйтесь";
+  const allArchiveEntries = data.sections.flatMap((sectionItem) =>
+    sectionItem.subsections.flatMap((sub) =>
+      sub.archived.map((block) => ({ block, section: sectionItem, subsection: sub })),
+    ),
+  );
+  const archiveEntries = archiveScope === "active" && active
+    ? allArchiveEntries.filter(({ section: itemSection, subsection: itemSubsection }) =>
+        itemSection.id === active.sectionId && itemSubsection.id === active.subsectionId)
+    : allArchiveEntries;
 
   const mutateSubsection = (sectionId: string, subsectionId: string, fn: (current: Subsection) => Subsection) => {
     setData((current) => ({
@@ -237,9 +297,9 @@ export default function DiaryApp() {
     const y = event.clientY;
     longPressRef.current = setTimeout(() => {
       longPressedRef.current = true;
-      if (navigator.vibrate) navigator.vibrate(25);
+      if (preferences.haptics) vibrate(25);
       setMenu({ type: "subsection", sectionId, subsectionId, x: Math.min(x + 90, window.innerWidth - 16), y: y + 14 });
-    }, 520);
+    }, 460);
   };
 
   const stopLongPress = () => {
@@ -339,20 +399,23 @@ export default function DiaryApp() {
     setToast("Запись восстановлена");
   };
 
-  const startReorder = (event: ReactPointerEvent<HTMLButtonElement>, index: number) => {
+  const startReorder = (index: number, pointerId: number) => {
     if (!active) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { index, pointerId: event.pointerId };
+    dragRef.current = { index, pointerId };
     document.body.classList.add("is-reordering");
+    if (preferences.haptics) vibrate(24);
   };
 
-  const moveReorder = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const moveReorder = (event: ReactPointerEvent<HTMLElement>) => {
     if (!dragRef.current || !active) return;
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-block-index]");
     const nextIndex = target ? Number(target.dataset.blockIndex) : -1;
     const fromIndex = dragRef.current.index;
     if (nextIndex < 0 || nextIndex === fromIndex) return;
+    const before = new Map(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-block-id]"))
+        .map((element) => [element.dataset.blockId || "", element.getBoundingClientRect()] as const),
+    );
     mutateSubsection(active.sectionId, active.subsectionId, (current) => {
       const blocks = [...current.blocks];
       const [moved] = blocks.splice(fromIndex, 1);
@@ -360,11 +423,31 @@ export default function DiaryApp() {
       return { ...current, blocks };
     });
     dragRef.current.index = nextIndex;
+    if (preferences.haptics) vibrate(8);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelectorAll<HTMLElement>("[data-block-id]").forEach((element) => {
+        const oldRect = before.get(element.dataset.blockId || "");
+        if (!oldRect) return;
+        const newRect = element.getBoundingClientRect();
+        const deltaY = oldRect.top - newRect.top;
+        if (Math.abs(deltaY) > 1 && element.animate) {
+          element.animate(
+            [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0)" }],
+            { duration: 270, easing: "cubic-bezier(.16,1,.3,1)" },
+          );
+        }
+      });
+    }));
   };
 
   const stopReorder = () => {
     dragRef.current = null;
     document.body.classList.remove("is-reordering");
+  };
+
+  const togglePreference = (key: keyof Omit<Preferences, "language">) => {
+    setPreferences((current) => ({ ...current, [key]: !current[key] }));
+    if (preferences.haptics) vibrate(12);
   };
 
   if (!hydrated) return <div className="app-loading" aria-label="Загрузка"><span /></div>;
@@ -373,8 +456,6 @@ export default function DiaryApp() {
     <div className="app-shell" onPointerDown={(event) => {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
-      <a className="skip-link" href="#main-content">К содержимому</a>
-
       {view === "home" && (
         <main className="screen home-screen" id="main-content">
           <header className="home-header">
@@ -421,7 +502,7 @@ export default function DiaryApp() {
                       className="subsection-row"
                       key={sub.id}
                       onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
-                      onPointerUp={(event) => {
+                      onPointerUp={() => {
                         stopLongPress();
                         if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
                       }}
@@ -445,20 +526,20 @@ export default function DiaryApp() {
       {view === "profile" && (
         <main className="screen profile-screen" id="main-content">
           <ScreenHeader title="Профиль" onBack={goHome} />
-          <button className="profile-hero">
+          <button className="profile-hero" onClick={() => setProfilePanel("account")}>
             <span className="avatar"><Icon name="user" size={48} /></span>
             <span className="profile-copy">
-              <strong>Константин</strong>
+              <strong>{displayName}</strong>
               <span>Личный дневник и проекты</span>
-              <span>@konstantin</span>
+              <span>{displayUsername}</span>
             </span>
             <Icon name="chevron" />
           </button>
           <SettingsGroup rows={[
-            { icon: "user", label: "Аккаунт", accent: "blue" },
-            { icon: "crown", label: "Подписка", accent: "purple" },
-            { icon: "bell", label: "Уведомления", accent: "orange" },
-            { icon: "shield", label: "Конфиденциальность", accent: "green" },
+            { icon: "user", label: "Аккаунт", accent: "blue", onClick: () => setProfilePanel("account") },
+            { icon: "crown", label: "Подписка", accent: "purple", value: "Базовая", onClick: () => setProfilePanel("subscription") },
+            { icon: "bell", label: "Уведомления", accent: "orange", value: preferences.reminders ? "Вкл." : "Выкл.", onClick: () => setProfilePanel("notifications") },
+            { icon: "shield", label: "Конфиденциальность", accent: "green", onClick: () => setProfilePanel("privacy") },
           ]} />
           <SettingsGroup rows={[
             {
@@ -466,12 +547,24 @@ export default function DiaryApp() {
               label: "Тема",
               accent: "purple",
               value: theme === "dark" ? "Тёмная" : theme === "light" ? "Светлая" : "Системная",
-              onClick: () => setTheme(themes[(themes.indexOf(theme) + 1) % themes.length]),
+              onClick: () => {
+                setTheme(themes[(themes.indexOf(theme) + 1) % themes.length]);
+                if (preferences.haptics) vibrate(12);
+              },
             },
-            { icon: "globe", label: "Язык", accent: "blue", value: "Русский" },
-            { icon: "archive", label: "Архив", accent: "orange", onClick: () => setView("archive") },
+            {
+              icon: "globe",
+              label: "Язык",
+              accent: "blue",
+              value: preferences.language === "ru" ? "Русский" : preferences.language === "kk" ? "Қазақша" : "English",
+              onClick: () => setProfilePanel("language"),
+            },
+            { icon: "archive", label: "Архив", accent: "orange", value: allArchiveEntries.length ? String(allArchiveEntries.length) : undefined, onClick: () => {
+              setArchiveScope("all");
+              setView("archive");
+            } },
             { icon: "download", label: "Экспорт данных", accent: "green", onClick: () => {
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data, preferences }, null, 2)], { type: "application/json" });
               const link = document.createElement("a");
               link.href = URL.createObjectURL(blob);
               link.download = "diary-export.json";
@@ -481,10 +574,17 @@ export default function DiaryApp() {
             } },
           ]} />
           <SettingsGroup rows={[
-            { icon: "help", label: "Помощь", accent: "amber" },
-            { icon: "info", label: "О приложении", accent: "blue", value: "v1.0" },
+            { icon: "help", label: "Помощь", accent: "amber", onClick: () => setProfilePanel("help") },
+            { icon: "info", label: "О приложении", accent: "blue", value: "v1.1", onClick: () => setProfilePanel("about") },
           ]} />
-          <button className="logout-row"><span className="tile-icon red"><Icon name="logout" /></span>Выйти</button>
+          <button className="logout-row" onClick={async () => {
+            if (authUser && supabase) {
+              const { error } = await supabase.auth.signOut({ scope: "local" });
+              setToast(error ? error.message : "Вы вышли из аккаунта");
+            } else {
+              setProfilePanel("account");
+            }
+          }}><span className="tile-icon red"><Icon name="logout" /></span>{authUser ? "Выйти" : "Войти"}</button>
         </main>
       )}
 
@@ -493,7 +593,10 @@ export default function DiaryApp() {
           <header className="subsection-header">
             <button className="back-button" aria-label="Назад" onClick={goHome}><Icon name="back" size={28} /></button>
             <div className="breadcrumbs"><span>{section.name}</span><Icon name="chevron" size={18} /><strong>{subsection.name}</strong></div>
-            <button className="archive-link" onClick={() => setView("archive")}>Архив{subsection.archived.length ? ` · ${subsection.archived.length}` : ""}</button>
+            <button className="archive-link" onClick={() => {
+              setArchiveScope("active");
+              setView("archive");
+            }}>Архив{subsection.archived.length ? ` · ${subsection.archived.length}` : ""}</button>
           </header>
           <div className="blocks-list">
             {subsection.blocks.length === 0 ? (
@@ -508,6 +611,7 @@ export default function DiaryApp() {
                 block={block}
                 index={index}
                 key={block.id}
+                hidePreview={preferences.hidePreviews}
                 onArchive={() => archiveBlock(block.id)}
                 onDelete={() => setDialog({ kind: "delete-block", blockId: block.id })}
                 onReorderStart={startReorder}
@@ -524,24 +628,25 @@ export default function DiaryApp() {
 
       {view === "archive" && (
         <main className="screen archive-screen" id="main-content">
-          <ScreenHeader title="Архив" onBack={() => setView(active ? "subsection" : "profile")} />
+          <ScreenHeader
+            title={archiveScope === "active" && subsection ? `Архив · ${subsection.name}` : "Архив"}
+            onBack={() => setView(archiveScope === "active" && active ? "subsection" : "profile")}
+          />
           <div className="archive-list">
-            {data.sections.flatMap((sectionItem) => sectionItem.subsections.flatMap((sub) => sub.archived.map((block) => ({
-              block, section: sectionItem, subsection: sub,
-            })))).length === 0 ? (
+            {archiveEntries.length === 0 ? (
               <div className="empty-state">
                 <span className="empty-state-icon"><Icon name="archive" size={31} /></span>
                 <h2>Архив пуст</h2>
                 <p>Смахните запись влево, и она появится здесь.</p>
               </div>
-            ) : data.sections.flatMap((sectionItem) => sectionItem.subsections.flatMap((sub) => sub.archived.map((block) => (
+            ) : archiveEntries.map(({ block, section: sectionItem, subsection: sub }) => (
               <article className="archive-item" key={block.id}>
-                <div><span>{sectionItem.name} · {sub.name}</span><h2>{block.title}</h2><p>{block.body}</p></div>
+                <div><span>{sectionItem.name} · {sub.name}</span><h2>{block.title}</h2><p>{preferences.hidePreviews ? "Текст скрыт настройками конфиденциальности" : block.body}</p></div>
                 <button className="round-button small" aria-label={`Восстановить ${block.title}`} onClick={() => restoreBlock(sectionItem.id, sub.id, block.id)}>
                   <Icon name="restore" size={21} />
                 </button>
               </article>
-            ))))}
+            ))}
           </div>
         </main>
       )}
@@ -573,11 +678,8 @@ export default function DiaryApp() {
       )}
 
       {sheet && (
-        <div className="modal-layer" role="presentation" onPointerDown={(event) => {
-          if (event.target === event.currentTarget) setSheet(null);
-        }}>
-          <form className="bottom-sheet" onSubmit={submitSheet}>
-            <div className="sheet-handle" />
+        <DraggableSheet onClose={() => setSheet(null)} tall={sheet === "block"}>
+          <form className="sheet-form" onSubmit={submitSheet}>
             <div className="sheet-header">
               <button type="button" className="text-button muted-action" onClick={() => setSheet(null)}>Отмена</button>
               <strong>{sheet === "block" ? todayLabel() : sheet === "section" ? "Новый раздел" : "Новый подраздел"}</strong>
@@ -585,10 +687,8 @@ export default function DiaryApp() {
             </div>
             {sheet === "block" ? (
               <div className="editor-fields">
-                <label htmlFor="block-title">Заголовок</label>
-                <input id="block-title" autoFocus value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Название записи" />
-                <label htmlFor="block-body">Текст</label>
-                <textarea id="block-body" value={draftBody} onChange={(event) => setDraftBody(event.target.value)} placeholder="Начните писать…" />
+                <input id="block-title" aria-label="Название записи" autoFocus value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Название записи" />
+                <textarea id="block-body" aria-label="Текст записи" value={draftBody} onChange={(event) => setDraftBody(event.target.value)} placeholder="Начните писать…" />
               </div>
             ) : (
               <div className="name-field">
@@ -597,7 +697,107 @@ export default function DiaryApp() {
               </div>
             )}
           </form>
-        </div>
+        </DraggableSheet>
+      )}
+
+      {profilePanel && (
+        <DraggableSheet onClose={() => setProfilePanel(null)} tall={profilePanel === "account"}>
+          {profilePanel === "account" ? (
+            authUser ? (
+              <PanelContent title="Аккаунт" onClose={() => setProfilePanel(null)}>
+                <div className="account-card">
+                  <span className="avatar compact-avatar"><Icon name="user" size={34} /></span>
+                  <div><strong>{displayName}</strong><span>{displayUsername}</span><span>{authUser.email}</span></div>
+                </div>
+                <p className="panel-copy">Почта подтверждена через Supabase. Имя и никнейм используются в профиле приложения.</p>
+                <button className="danger-button wide-button" onClick={async () => {
+                  if (!supabase) return;
+                  const { error } = await supabase.auth.signOut({ scope: "local" });
+                  if (!error) setProfilePanel(null);
+                  setToast(error ? error.message : "Вы вышли из аккаунта");
+                }}>Выйти на этом устройстве</button>
+              </PanelContent>
+            ) : (
+              <AuthPanel onClose={() => setProfilePanel(null)} onToast={setToast} />
+            )
+          ) : (
+            <PanelContent
+              title={{
+                subscription: "Подписка",
+                notifications: "Уведомления",
+                privacy: "Конфиденциальность",
+                language: "Язык",
+                help: "Помощь",
+                about: "О приложении",
+              }[profilePanel]}
+              onClose={() => setProfilePanel(null)}
+            >
+              {profilePanel === "subscription" && (
+                <>
+                  <div className="plan-card"><Icon name="crown" size={32} /><div><strong>Базовый план</strong><span>Все основные функции дневника доступны бесплатно.</span></div></div>
+                  <p className="panel-copy">Синхронизация между устройствами и расширенные резервные копии появятся в следующей версии.</p>
+                </>
+              )}
+              {profilePanel === "notifications" && (
+                <div className="toggle-list">
+                  <ToggleRow label="Напоминания" value={preferences.reminders} onChange={async () => {
+                    if (!preferences.reminders && "Notification" in window && Notification.permission === "default") {
+                      const permission = await Notification.requestPermission();
+                      if (permission !== "granted") {
+                        setToast("Уведомления не разрешены в системе");
+                        return;
+                      }
+                    }
+                    togglePreference("reminders");
+                  }} />
+                  <ToggleRow label="Итоги дня" value={preferences.dailySummary} onChange={() => togglePreference("dailySummary")} />
+                  <ToggleRow label="Тактильный отклик" value={preferences.haptics} onChange={() => togglePreference("haptics")} />
+                </div>
+              )}
+              {profilePanel === "privacy" && (
+                <>
+                  <div className="toggle-list">
+                    <ToggleRow label="Скрывать текст записей" value={preferences.hidePreviews} onChange={() => togglePreference("hidePreviews")} />
+                  </div>
+                  <p className="panel-copy">Данные дневника хранятся локально на устройстве. Аккаунт Supabase используется только для регистрации и профиля.</p>
+                </>
+              )}
+              {profilePanel === "language" && (
+                <div className="choice-list">
+                  {([
+                    ["ru", "Русский"],
+                    ["kk", "Қазақша"],
+                    ["en", "English"],
+                  ] as const).map(([code, label]) => (
+                    <button key={code} className={`choice-row ${preferences.language === code ? "selected" : ""}`} onClick={() => {
+                      setPreferences((current) => ({ ...current, language: code }));
+                      document.documentElement.lang = code;
+                      if (preferences.haptics) vibrate(12);
+                    }}>
+                      <span>{label}</span>{preferences.language === code && <span className="choice-check">✓</span>}
+                    </button>
+                  ))}
+                  <p className="panel-copy">Интерфейс на казахском и английском будет переведён полностью в следующем обновлении; выбор уже сохраняется.</p>
+                </div>
+              )}
+              {profilePanel === "help" && (
+                <div className="help-list">
+                  <p><strong>Перенос:</strong> удерживайте любую точку записи, затем двигайте вверх или вниз.</p>
+                  <p><strong>Архив:</strong> смахните запись влево.</p>
+                  <p><strong>Удаление:</strong> смахните вправо и подтвердите действие.</p>
+                  <p><strong>Меню подраздела:</strong> удерживайте строку подраздела.</p>
+                </div>
+              )}
+              {profilePanel === "about" && (
+                <div className="about-panel">
+                  <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
+                  <h2>Дневник 1.1</h2>
+                  <p>Быстрое PWA-приложение для заметок, мыслей и проектов. Работает с телефона и устанавливается на главный экран.</p>
+                </div>
+              )}
+            </PanelContent>
+          )}
+        </DraggableSheet>
       )}
 
       {dialog && (
@@ -662,9 +862,223 @@ function SettingsGroup({ rows }: { rows: SettingRow[] }) {
   );
 }
 
+function DraggableSheet({
+  children,
+  onClose,
+  tall = false,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  tall?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(tall);
+  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
+  const drag = useRef<{ y: number; pointerId: number } | null>(null);
+
+  const finishDrag = () => {
+    if (!drag.current) return;
+    const finalOffset = offsetRef.current;
+    if (finalOffset > 150 && !expanded) onClose();
+    else if (finalOffset > 90 && expanded) setExpanded(false);
+    else if (finalOffset < -55) setExpanded(true);
+    offsetRef.current = 0;
+    setOffset(0);
+    drag.current = null;
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section
+        className={`bottom-sheet ${expanded ? "expanded" : ""}`}
+        style={{ transform: `translateY(${offset}px)` }}
+        role="dialog"
+        aria-modal="true"
+      >
+        <button
+          type="button"
+          className="sheet-drag-zone"
+          aria-label={expanded ? "Свернуть панель" : "Развернуть панель"}
+          onDoubleClick={() => setExpanded((current) => !current)}
+          onPointerDown={(event) => {
+            drag.current = { y: event.clientY, pointerId: event.pointerId };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+            const delta = event.clientY - drag.current.y;
+            const nextOffset = Math.max(expanded ? -24 : -180, Math.min(delta, window.innerHeight * 0.72));
+            offsetRef.current = nextOffset;
+            setOffset(nextOffset);
+          }}
+          onPointerUp={finishDrag}
+          onPointerCancel={finishDrag}
+        >
+          <span className="sheet-handle" />
+        </button>
+        <div className="sheet-scroll">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function PanelContent({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <div className="sheet-header panel-header">
+        <button type="button" className="text-button muted-action" onClick={onClose}>Закрыть</button>
+        <strong>{title}</strong>
+        <span />
+      </div>
+      <div className="panel-body">{children}</div>
+    </>
+  );
+}
+
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: () => void }) {
+  return (
+    <button className="toggle-row" role="switch" aria-checked={value} onClick={onChange}>
+      <span>{label}</span>
+      <span className={`toggle ${value ? "on" : ""}`}><span /></span>
+    </button>
+  );
+}
+
+function AuthPanel({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+  const [mode, setMode] = useState<"register" | "login">("register");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitAuth = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (!supabase) {
+      setError("Supabase ещё не подключён. Добавьте URL проекта и publishable key.");
+      return;
+    }
+    if (!email.trim() || !password) {
+      setError("Введите почту и пароль.");
+      return;
+    }
+    if (mode === "register") {
+      const normalizedUsername = username.trim().toLowerCase();
+      if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
+        setError("Никнейм: 3–24 символа, латиница, цифры и _.");
+        return;
+      }
+      if (fullName.trim().length < 2) {
+        setError("Введите имя.");
+        return;
+      }
+      if (password.length < 8) {
+        setError("Пароль должен содержать не менее 8 символов.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Пароли не совпадают.");
+        return;
+      }
+      setSubmitting(true);
+      const { data: nicknameAvailable, error: nicknameError } = await supabase
+        .rpc("is_username_available", { candidate_username: normalizedUsername });
+      if (nicknameAvailable === false) {
+        setSubmitting(false);
+        setError("Этот никнейм уже занят.");
+        return;
+      }
+      if (nicknameError) {
+        console.warn("Username preflight check failed:", nicknameError.message);
+      }
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: { username: normalizedUsername, full_name: fullName.trim() },
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      setSubmitting(false);
+      if (signUpError) {
+        setError(signUpError.message.includes("Database error")
+          ? "Не удалось создать профиль. Проверьте SQL-схему Supabase или уникальность никнейма."
+          : signUpError.message);
+        return;
+      }
+      onToast(data.session ? "Аккаунт создан" : "Проверьте почту и подтвердите регистрацию");
+      onClose();
+      return;
+    }
+
+    setSubmitting(true);
+    const { error: loginError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setSubmitting(false);
+    if (loginError) {
+      setError("Не удалось войти. Проверьте почту и пароль.");
+      return;
+    }
+    onToast("Вы вошли в аккаунт");
+    onClose();
+  };
+
+  return (
+    <form className="auth-panel" onSubmit={submitAuth}>
+      <div className="sheet-header panel-header">
+        <button type="button" className="text-button muted-action" onClick={onClose}>Закрыть</button>
+        <strong>{mode === "register" ? "Регистрация" : "Вход"}</strong>
+        <button type="submit" className="text-button" disabled={submitting}>{submitting ? "…" : "Готово"}</button>
+      </div>
+      <div className="auth-tabs" role="tablist">
+        <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
+        <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
+      </div>
+      {!isSupabaseConfigured && (
+        <div className="config-note">
+          Интерфейс готов. Для работы регистрации добавьте переменные Supabase на хостинге.
+        </div>
+      )}
+      <div className="auth-fields">
+        <label>Почта<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></label>
+        {mode === "register" && (
+          <>
+            <label>Уникальный никнейм<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="nickname" /></label>
+            <label>Имя<input autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Ваше имя" /></label>
+          </>
+        )}
+        <label>Пароль<input type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Не менее 8 символов" /></label>
+        {mode === "register" && (
+          <label>Подтверждение пароля<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" /></label>
+        )}
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="primary-button wide-button" disabled={submitting} type="submit">
+          {submitting ? "Подождите…" : mode === "register" ? "Создать аккаунт" : "Войти"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function SwipeBlock({
   block,
   index,
+  hidePreview,
   onArchive,
   onDelete,
   onReorderStart,
@@ -673,57 +1087,101 @@ function SwipeBlock({
 }: {
   block: Block;
   index: number;
+  hidePreview: boolean;
   onArchive: () => void;
   onDelete: () => void;
-  onReorderStart: (event: ReactPointerEvent<HTMLButtonElement>, index: number) => void;
-  onReorderMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onReorderStart: (index: number, pointerId: number) => void;
+  onReorderMove: (event: ReactPointerEvent<HTMLElement>) => void;
   onReorderEnd: () => void;
 }) {
   const [offset, setOffset] = useState(0);
-  const startX = useRef(0);
-  const activePointer = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const start = useRef({ x: 0, y: 0 });
+  const offsetRef = useRef(0);
+  const pointerId = useRef<number | null>(null);
+  const gesture = useRef<"pending" | "swipe" | "scroll" | "reorder" | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+
+  const reset = () => {
+    clearHold();
+    pointerId.current = null;
+    gesture.current = null;
+    offsetRef.current = 0;
+    setOffset(0);
+    setDragging(false);
+  };
+
+  const finish = () => {
+    const currentGesture = gesture.current;
+    const currentOffset = offsetRef.current;
+    if (currentGesture === "reorder") onReorderEnd();
+    else if (currentGesture === "swipe" && currentOffset <= -88) {
+      vibrate(18);
+      onArchive();
+    } else if (currentGesture === "swipe" && currentOffset >= 88) {
+      vibrate(20);
+      onDelete();
+    }
+    reset();
+  };
 
   return (
-    <div className="swipe-wrap" data-block-index={index}>
+    <div
+      className={`swipe-wrap ${offset < 0 ? "swiping-left" : offset > 0 ? "swiping-right" : ""} ${dragging ? "dragging" : ""}`}
+      data-block-index={index}
+      data-block-id={block.id}
+    >
       <div className="swipe-action archive-action"><Icon name="archive" /><span>В архив</span></div>
       <div className="swipe-action delete-action"><Icon name="trash" /><span>Удалить</span></div>
       <article
         className="note-block"
         style={{ transform: `translateX(${offset}px)` }}
+        onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
-          if ((event.target as HTMLElement).closest(".drag-handle")) return;
-          startX.current = event.clientX;
-          activePointer.current = true;
+          if (event.pointerType === "mouse" && event.button !== 0) return;
+          start.current = { x: event.clientX, y: event.clientY };
+          pointerId.current = event.pointerId;
+          gesture.current = "pending";
           event.currentTarget.setPointerCapture(event.pointerId);
+          holdTimer.current = setTimeout(() => {
+            gesture.current = "reorder";
+            setDragging(true);
+            onReorderStart(index, event.pointerId);
+          }, 390);
         }}
         onPointerMove={(event) => {
-          if (!activePointer.current) return;
-          const next = Math.max(-132, Math.min(132, event.clientX - startX.current));
-          if (Math.abs(next) > 6) setOffset(next);
+          if (pointerId.current !== event.pointerId || !gesture.current) return;
+          const dx = event.clientX - start.current.x;
+          const dy = event.clientY - start.current.y;
+          if (gesture.current === "pending" && Math.hypot(dx, dy) > 9) {
+            clearHold();
+            gesture.current = Math.abs(dx) > Math.abs(dy) * 1.15 ? "swipe" : "scroll";
+          }
+          if (gesture.current === "swipe") {
+            const next = Math.max(-132, Math.min(132, dx));
+            offsetRef.current = next;
+            setOffset(next);
+          } else if (gesture.current === "reorder") {
+            onReorderMove(event);
+          }
         }}
-        onPointerUp={() => {
-          activePointer.current = false;
-          if (offset <= -88) onArchive();
-          else if (offset >= 88) onDelete();
-          setOffset(0);
+        onPointerUp={finish}
+        onPointerCancel={() => {
+          if (gesture.current === "reorder") onReorderEnd();
+          reset();
         }}
-        onPointerCancel={() => { activePointer.current = false; setOffset(0); }}
       >
         <div className="note-meta">
           <span>{block.createdAt}</span>
-          <button
-            className="drag-handle"
-            aria-label={`Переместить запись ${block.title}`}
-            onPointerDown={(event) => onReorderStart(event, index)}
-            onPointerMove={onReorderMove}
-            onPointerUp={onReorderEnd}
-            onPointerCancel={onReorderEnd}
-          >
-            <Icon name="grip" size={21} />
-          </button>
+          <span className="hold-hint"><Icon name="grip" size={18} />Удерживайте для переноса</span>
         </div>
         <h2>{block.title}</h2>
-        <p>{block.body}</p>
+        <p>{hidePreview ? "Текст скрыт настройками конфиденциальности" : block.body}</p>
       </article>
     </div>
   );
