@@ -9,6 +9,21 @@ import {
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
+import {
+  DndContext,
+  DragEndEvent,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 type IconName =
@@ -74,7 +89,10 @@ type Block = {
   title: string;
   body: string;
   createdAt: string;
+  titleColor?: TitleColor;
 };
+
+type TitleColor = "green" | "blue" | "purple" | "orange" | "pink" | "neutral";
 
 type Subsection = {
   id: string;
@@ -158,6 +176,29 @@ const defaultPreferences: Preferences = {
   language: "ru",
 };
 
+const subsectionIconOptions: Array<{ icon: IconName; accent: string; label: string }> = [
+  { icon: "folder", accent: "blue", label: "Папка" },
+  { icon: "checklist", accent: "amber", label: "Задачи" },
+  { icon: "pen", accent: "green", label: "Записи" },
+  { icon: "bulb", accent: "amber", label: "Идеи" },
+  { icon: "heart", accent: "pink", label: "Личное" },
+  { icon: "cube", accent: "purple", label: "Проект" },
+  { icon: "message", accent: "blue", label: "Мысли" },
+  { icon: "cart", accent: "green", label: "Покупки" },
+  { icon: "clapper", accent: "purple", label: "Видео" },
+  { icon: "train", accent: "orange", label: "Поездки" },
+  { icon: "archive", accent: "gray", label: "Разное" },
+];
+
+const titleColorOptions: Array<{ value: TitleColor; label: string }> = [
+  { value: "green", label: "Зелёный" },
+  { value: "blue", label: "Синий" },
+  { value: "purple", label: "Фиолетовый" },
+  { value: "orange", label: "Оранжевый" },
+  { value: "pink", label: "Розовый" },
+  { value: "neutral", label: "Обычный" },
+];
+
 function vibrate(pattern: number | number[] = 18) {
   if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
 }
@@ -180,19 +221,32 @@ export default function DiaryApp() {
   const [active, setActive] = useState<{ sectionId: string; subsectionId: string } | null>(null);
   const [menu, setMenu] = useState<{ type: "section" | "subsection"; sectionId: string; subsectionId?: string; x: number; y: number } | null>(null);
   const [sheet, setSheet] = useState<"section" | "subsection" | "block" | null>(null);
-  const [dialog, setDialog] = useState<{ kind: "rename-section" | "rename-subsection" | "delete-block"; sectionId?: string; subsectionId?: string; blockId?: string } | null>(null);
+  const [dialog, setDialog] = useState<{
+    kind: "rename-section" | "rename-subsection" | "delete-section" | "delete-subsection" | "delete-block";
+    sectionId?: string;
+    subsectionId?: string;
+    blockId?: string;
+    label?: string;
+  } | null>(null);
   const [toast, setToast] = useState("");
   const [draftName, setDraftName] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftIcon, setDraftIcon] = useState<IconName>("folder");
+  const [draftAccent, setDraftAccent] = useState("blue");
+  const [draftTitleColor, setDraftTitleColor] = useState<TitleColor>("green");
   const [sheetSectionId, setSheetSectionId] = useState<string | null>(null);
   const [profilePanel, setProfilePanel] = useState<ProfilePanel | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(!supabase);
   const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressedRef = useRef(false);
-  const dragRef = useRef<{ index: number; pointerId: number } | null>(null);
+  const dragSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 9 } }),
+  );
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- localStorage hydration is intentionally client-only. */
@@ -207,7 +261,10 @@ export default function DiaryApp() {
       setData(initialData);
     }
     setHydrated(true);
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    if ("serviceWorker" in navigator) {
+      const serviceWorkerUrl = new URL("sw.js", document.baseURI);
+      navigator.serviceWorker.register(serviceWorkerUrl.pathname).catch(() => undefined);
+    }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
@@ -215,9 +272,10 @@ export default function DiaryApp() {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: sessionData }) => {
       setAuthUser(sessionData.session?.user ?? null);
-    });
+    }).finally(() => setAuthReady(true));
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthUser(session?.user ?? null);
+      setAuthReady(true);
     });
     return () => subscription.subscription.unsubscribe();
   }, []);
@@ -285,10 +343,20 @@ export default function DiaryApp() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const menuPosition = (x: number, y: number, rows: number) => {
+    const width = Math.min(280, window.innerWidth - 32);
+    const height = rows * 54 + 2;
+    return {
+      x: Math.max(16, Math.min(x, window.innerWidth - width - 16)),
+      y: Math.max(12, Math.min(y, window.innerHeight - height - 12)),
+    };
+  };
+
   const showMenu = (event: ReactPointerEvent<HTMLButtonElement>, payload: Omit<NonNullable<typeof menu>, "x" | "y">) => {
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
-    setMenu({ ...payload, x: Math.min(rect.right, window.innerWidth - 16), y: rect.bottom + 4 });
+    const position = menuPosition(rect.right - 280, rect.bottom + 4, payload.type === "section" ? 3 : 2);
+    setMenu({ ...payload, ...position });
   };
 
   const startLongPress = (event: ReactPointerEvent<HTMLButtonElement>, sectionId: string, subsectionId: string) => {
@@ -298,8 +366,10 @@ export default function DiaryApp() {
     longPressRef.current = setTimeout(() => {
       longPressedRef.current = true;
       if (preferences.haptics) vibrate(25);
-      setMenu({ type: "subsection", sectionId, subsectionId, x: Math.min(x + 90, window.innerWidth - 16), y: y + 14 });
-    }, 460);
+      const position = menuPosition(x - 140, y + 14, 2);
+      setMenu({ type: "subsection", sectionId, subsectionId, ...position });
+      document.getSelection()?.removeAllRanges();
+    }, 340);
   };
 
   const stopLongPress = () => {
@@ -317,7 +387,14 @@ export default function DiaryApp() {
       setData((current) => ({
         sections: current.sections.map((item) => item.id === sheetSectionId ? {
           ...item,
-          subsections: [...item.subsections, { id: uid("subsection"), name: draftName.trim(), icon: "folder", accent: "blue", blocks: [], archived: [] }],
+          subsections: [...item.subsections, {
+            id: uid("subsection"),
+            name: draftName.trim(),
+            icon: draftIcon,
+            accent: draftAccent,
+            blocks: [],
+            archived: [],
+          }],
         } : item),
       }));
       setToast("Подраздел добавлен");
@@ -327,9 +404,10 @@ export default function DiaryApp() {
         ...current,
         blocks: [{
           id: uid("block"),
-          title: draftTitle.trim() || "Без заголовка",
+          title: draftTitle.trim(),
           body: draftBody.trim(),
           createdAt: todayLabel(),
+          titleColor: draftTitleColor,
         }, ...current.blocks],
       }));
       setToast("Запись сохранена");
@@ -339,6 +417,9 @@ export default function DiaryApp() {
     setDraftName("");
     setDraftTitle("");
     setDraftBody("");
+    setDraftIcon("folder");
+    setDraftAccent("blue");
+    setDraftTitleColor("green");
     setSheetSectionId(null);
   };
 
@@ -381,13 +462,12 @@ export default function DiaryApp() {
     setToast("Запись перемещена в архив");
   };
 
-  const deleteBlock = () => {
-    if (!active || !dialog?.blockId) return;
+  const deleteBlock = (blockId: string) => {
+    if (!active) return;
     mutateSubsection(active.sectionId, active.subsectionId, (current) => ({
       ...current,
-      blocks: current.blocks.filter((item) => item.id !== dialog.blockId),
+      blocks: current.blocks.filter((item) => item.id !== blockId),
     }));
-    setDialog(null);
     setToast("Запись удалена");
   };
 
@@ -399,50 +479,51 @@ export default function DiaryApp() {
     setToast("Запись восстановлена");
   };
 
-  const startReorder = (index: number, pointerId: number) => {
-    if (!active) return;
-    dragRef.current = { index, pointerId };
+  const beginDrag = () => {
     document.body.classList.add("is-reordering");
+    document.getSelection()?.removeAllRanges();
     if (preferences.haptics) vibrate(24);
   };
 
-  const moveReorder = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!dragRef.current || !active) return;
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-block-index]");
-    const nextIndex = target ? Number(target.dataset.blockIndex) : -1;
-    const fromIndex = dragRef.current.index;
-    if (nextIndex < 0 || nextIndex === fromIndex) return;
-    const before = new Map(
-      Array.from(document.querySelectorAll<HTMLElement>("[data-block-id]"))
-        .map((element) => [element.dataset.blockId || "", element.getBoundingClientRect()] as const),
-    );
+  const finishBlockDrag = (event: DragEndEvent) => {
+    document.body.classList.remove("is-reordering");
+    document.getSelection()?.removeAllRanges();
+    if (!active || !event.over || event.active.id === event.over.id) return;
     mutateSubsection(active.sectionId, active.subsectionId, (current) => {
-      const blocks = [...current.blocks];
-      const [moved] = blocks.splice(fromIndex, 1);
-      blocks.splice(nextIndex, 0, moved);
-      return { ...current, blocks };
+      const oldIndex = current.blocks.findIndex((item) => item.id === event.active.id);
+      const newIndex = current.blocks.findIndex((item) => item.id === event.over?.id);
+      if (oldIndex < 0 || newIndex < 0) return current;
+      return { ...current, blocks: arrayMove(current.blocks, oldIndex, newIndex) };
     });
-    dragRef.current.index = nextIndex;
-    if (preferences.haptics) vibrate(8);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.querySelectorAll<HTMLElement>("[data-block-id]").forEach((element) => {
-        const oldRect = before.get(element.dataset.blockId || "");
-        if (!oldRect) return;
-        const newRect = element.getBoundingClientRect();
-        const deltaY = oldRect.top - newRect.top;
-        if (Math.abs(deltaY) > 1 && element.animate) {
-          element.animate(
-            [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0)" }],
-            { duration: 270, easing: "cubic-bezier(.16,1,.3,1)" },
-          );
-        }
-      });
-    }));
+    if (preferences.haptics) vibrate(12);
   };
 
-  const stopReorder = () => {
-    dragRef.current = null;
+  const finishSectionDrag = (event: DragEndEvent) => {
     document.body.classList.remove("is-reordering");
+    document.getSelection()?.removeAllRanges();
+    if (!event.over || event.active.id === event.over.id) return;
+    setData((current) => {
+      const oldIndex = current.sections.findIndex((item) => item.id === event.active.id);
+      const newIndex = current.sections.findIndex((item) => item.id === event.over?.id);
+      if (oldIndex < 0 || newIndex < 0) return current;
+      return { sections: arrayMove(current.sections, oldIndex, newIndex) };
+    });
+    if (preferences.haptics) vibrate(12);
+  };
+
+  const cancelDrag = () => {
+    document.body.classList.remove("is-reordering");
+    document.getSelection()?.removeAllRanges();
+  };
+
+  const confirmDelete = () => {
+    if (!dialog) return;
+    if (dialog.kind === "delete-section" && dialog.sectionId) removeSection(dialog.sectionId);
+    if (dialog.kind === "delete-subsection" && dialog.sectionId && dialog.subsectionId) {
+      removeSubsection(dialog.sectionId, dialog.subsectionId);
+    }
+    if (dialog.kind === "delete-block" && dialog.blockId) deleteBlock(dialog.blockId);
+    setDialog(null);
   };
 
   const togglePreference = (key: keyof Omit<Preferences, "language">) => {
@@ -450,14 +531,18 @@ export default function DiaryApp() {
     if (preferences.haptics) vibrate(12);
   };
 
-  if (!hydrated) return <div className="app-loading" aria-label="Загрузка"><span /></div>;
+  if (!hydrated || !authReady) return <div className="app-loading" aria-label="Загрузка"><span /></div>;
+
+  if (!authUser) {
+    return <AuthGate onToast={setToast} />;
+  }
 
   return (
     <div className="app-shell" onPointerDown={(event) => {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
       {view === "home" && (
-        <main className="screen home-screen" id="main-content">
+        <main className="screen home-screen">
           <header className="home-header">
             <div>
               <p className="eyebrow">{todayLabel()}</p>
@@ -474,57 +559,93 @@ export default function DiaryApp() {
             </div>
           </header>
 
-          <div className="section-list">
-            {data.sections.map((sectionItem) => (
-              <section className="diary-section" key={sectionItem.id}>
-                <div className="section-heading">
-                  <h2>{sectionItem.name}</h2>
-                  <button
-                    className="icon-button more-button"
-                    aria-label={`Меню раздела ${sectionItem.name}`}
-                    aria-expanded={menu?.type === "section" && menu.sectionId === sectionItem.id}
-                    onPointerDown={(event) => showMenu(event, { type: "section", sectionId: sectionItem.id })}
-                  >
-                    <Icon name="more" />
-                  </button>
-                </div>
-                <div className={`subsection-card ${sectionItem.subsections.length === 0 ? "empty-card" : ""}`}>
-                  {sectionItem.subsections.length === 0 ? (
-                    <button className="empty-section" onClick={() => {
-                      setSheetSectionId(sectionItem.id);
-                      setSheet("subsection");
-                    }}>
-                      <Icon name="plus" size={20} />
-                      Добавить первый подраздел
-                    </button>
-                  ) : sectionItem.subsections.map((sub, index) => (
-                    <button
-                      className="subsection-row"
-                      key={sub.id}
-                      onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
-                      onPointerUp={() => {
-                        stopLongPress();
-                        if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
-                      }}
-                      onPointerCancel={stopLongPress}
-                      onPointerLeave={stopLongPress}
-                    >
-                      <span className={`tile-icon ${sub.accent}`}><Icon name={sub.icon} size={23} /></span>
-                      <span className="row-label">{sub.name}</span>
-                      <Icon name="chevron" size={22} />
-                      {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
-                    </button>
+          {data.sections.length === 0 ? (
+            <div className="home-empty-state">
+              <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
+              <h2>Начните создавать свой дневник</h2>
+              <p>Добавьте первый раздел, а внутри него — подразделы для мыслей, планов и проектов.</p>
+              <button className="primary-button" onClick={() => {
+                setDraftName("");
+                setSheet("section");
+              }}><Icon name="plus" size={20} />Создать раздел</button>
+            </div>
+          ) : (
+            <DndContext
+              sensors={dragSensors}
+              onDragStart={beginDrag}
+              onDragCancel={cancelDrag}
+              onDragEnd={finishSectionDrag}
+            >
+              <SortableContext items={data.sections.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                <div className="section-list">
+                  {data.sections.map((sectionItem) => (
+                    <SortableSection id={sectionItem.id} key={sectionItem.id}>
+                      {(sortable) => (
+                        <>
+                          <div className="section-heading">
+                            <h2>{sectionItem.name}</h2>
+                            <button
+                              className="section-drag-handle"
+                              aria-label={`Переместить раздел ${sectionItem.name}`}
+                              {...sortable.attributes}
+                              {...sortable.listeners}
+                            >
+                              <Icon name="grip" size={20} />
+                            </button>
+                            <button
+                              className="icon-button more-button"
+                              aria-label={`Меню раздела ${sectionItem.name}`}
+                              aria-expanded={menu?.type === "section" && menu.sectionId === sectionItem.id}
+                              onPointerDown={(event) => showMenu(event, { type: "section", sectionId: sectionItem.id })}
+                            >
+                              <Icon name="more" />
+                            </button>
+                          </div>
+                          <div className={`subsection-card ${sectionItem.subsections.length === 0 ? "empty-card" : ""}`}>
+                            {sectionItem.subsections.length === 0 ? (
+                              <button className="empty-section" onClick={() => {
+                                setSheetSectionId(sectionItem.id);
+                                setDraftIcon("folder");
+                                setDraftAccent("blue");
+                                setSheet("subsection");
+                              }}>
+                                <Icon name="plus" size={20} />
+                                Добавить первый подраздел
+                              </button>
+                            ) : sectionItem.subsections.map((sub, index) => (
+                              <button
+                                className="subsection-row"
+                                key={sub.id}
+                                onContextMenu={(event) => event.preventDefault()}
+                                onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
+                                onPointerUp={() => {
+                                  stopLongPress();
+                                  if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
+                                }}
+                                onPointerCancel={stopLongPress}
+                                onPointerLeave={stopLongPress}
+                              >
+                                <span className={`tile-icon ${sub.accent}`}><Icon name={sub.icon} size={23} /></span>
+                                <span className="row-label">{sub.name}</span>
+                                <Icon name="chevron" size={22} />
+                                {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </SortableSection>
                   ))}
                 </div>
-              </section>
-            ))}
-          </div>
-          <p className="gesture-hint">Удерживайте подраздел, чтобы открыть его меню</p>
+              </SortableContext>
+            </DndContext>
+          )}
+          {data.sections.length > 0 && <p className="gesture-hint">Удерживайте подраздел для меню · перетаскивайте разделы за точки</p>}
         </main>
       )}
 
       {view === "profile" && (
-        <main className="screen profile-screen" id="main-content">
+        <main className="screen profile-screen">
           <ScreenHeader title="Профиль" onBack={goHome} />
           <button className="profile-hero" onClick={() => setProfilePanel("account")}>
             <span className="avatar"><Icon name="user" size={48} /></span>
@@ -589,46 +710,60 @@ export default function DiaryApp() {
       )}
 
       {view === "subsection" && active && subsection && section && (
-        <main className="screen subsection-screen" id="main-content">
-          <header className="subsection-header">
-            <button className="back-button" aria-label="Назад" onClick={goHome}><Icon name="back" size={28} /></button>
-            <div className="breadcrumbs"><span>{section.name}</span><Icon name="chevron" size={18} /><strong>{subsection.name}</strong></div>
+        <main className="screen subsection-screen">
+          <ContentHeader
+            onBack={goHome}
+            title={<><span>{section.name}</span><Icon name="chevron" size={19} /><strong>{subsection.name}</strong></>}
+            action={
             <button className="archive-link" onClick={() => {
               setArchiveScope("active");
               setView("archive");
             }}>Архив{subsection.archived.length ? ` · ${subsection.archived.length}` : ""}</button>
-          </header>
-          <div className="blocks-list">
-            {subsection.blocks.length === 0 ? (
-              <div className="empty-state">
-                <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
-                <h2>Здесь пока пусто</h2>
-                <p>Создайте первую запись — идеальное место для мыслей, планов или списка дел.</p>
-                <button className="primary-button" onClick={() => setSheet("block")}><Icon name="plus" size={20} />Создать запись</button>
-              </div>
-            ) : subsection.blocks.map((block, index) => (
-              <SwipeBlock
-                block={block}
-                index={index}
-                key={block.id}
-                hidePreview={preferences.hidePreviews}
-                onArchive={() => archiveBlock(block.id)}
-                onDelete={() => setDialog({ kind: "delete-block", blockId: block.id })}
-                onReorderStart={startReorder}
-                onReorderMove={moveReorder}
-                onReorderEnd={stopReorder}
-              />
-            ))}
-          </div>
-          <button className="floating-add" aria-label="Создать запись" onClick={() => { setDraftTitle(""); setDraftBody(""); setSheet("block"); }}>
+            }
+          />
+          {subsection.blocks.length === 0 ? (
+            <div className="empty-state">
+              <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
+              <h2>Начните с первой записи</h2>
+              <p>Запишите мысль, план или список дел. Заголовок можно оставить пустым.</p>
+              <button className="primary-button" onClick={() => setSheet("block")}><Icon name="plus" size={20} />Создать запись</button>
+            </div>
+          ) : (
+            <DndContext
+              sensors={dragSensors}
+              onDragStart={beginDrag}
+              onDragCancel={cancelDrag}
+              onDragEnd={finishBlockDrag}
+            >
+              <SortableContext items={subsection.blocks.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                <div className="blocks-list">
+                  {subsection.blocks.map((block) => (
+                    <SortableSwipeBlock
+                      block={block}
+                      key={block.id}
+                      hidePreview={preferences.hidePreviews}
+                      onArchive={() => archiveBlock(block.id)}
+                      onDelete={() => setDialog({ kind: "delete-block", blockId: block.id, label: block.title || "эту запись" })}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+          <button className="floating-add" aria-label="Создать запись" onClick={() => {
+            setDraftTitle("");
+            setDraftBody("");
+            setDraftTitleColor("green");
+            setSheet("block");
+          }}>
             <Icon name="plus" size={29} />
           </button>
         </main>
       )}
 
       {view === "archive" && (
-        <main className="screen archive-screen" id="main-content">
-          <ScreenHeader
+        <main className="screen archive-screen">
+          <ContentHeader
             title={archiveScope === "active" && subsection ? `Архив · ${subsection.name}` : "Архив"}
             onBack={() => setView(archiveScope === "active" && active ? "subsection" : "profile")}
           />
@@ -641,7 +776,11 @@ export default function DiaryApp() {
               </div>
             ) : archiveEntries.map(({ block, section: sectionItem, subsection: sub }) => (
               <article className="archive-item" key={block.id}>
-                <div><span>{sectionItem.name} · {sub.name}</span><h2>{block.title}</h2><p>{preferences.hidePreviews ? "Текст скрыт настройками конфиденциальности" : block.body}</p></div>
+                <div>
+                  <span>{sectionItem.name} · {sub.name}</span>
+                  {block.title && <h2 className={`title-${block.titleColor || "green"}`}>{block.title}</h2>}
+                  <p>{preferences.hidePreviews ? "Текст скрыт настройками конфиденциальности" : block.body}</p>
+                </div>
                 <button className="round-button small" aria-label={`Восстановить ${block.title}`} onClick={() => restoreBlock(sectionItem.id, sub.id, block.id)}>
                   <Icon name="restore" size={21} />
                 </button>
@@ -667,12 +806,27 @@ export default function DiaryApp() {
           }}><Icon name="edit" size={21} />Переименовать</button>
           {menu.type === "section" && <button role="menuitem" onClick={() => {
             setDraftName("");
+            setDraftIcon("folder");
+            setDraftAccent("blue");
             setSheetSectionId(menu.sectionId);
             setSheet("subsection");
           }}><Icon name="plus" size={21} />Добавить подраздел</button>}
           <button role="menuitem" className="danger" onClick={() => {
-            if (menu.type === "section") removeSection(menu.sectionId);
-            else if (menu.subsectionId) removeSubsection(menu.sectionId, menu.subsectionId);
+            if (menu.type === "section") {
+              const currentSection = data.sections.find((item) => item.id === menu.sectionId);
+              setDialog({ kind: "delete-section", sectionId: menu.sectionId, label: currentSection?.name });
+            } else if (menu.subsectionId) {
+              const currentSubsection = data.sections
+                .find((item) => item.id === menu.sectionId)
+                ?.subsections.find((item) => item.id === menu.subsectionId);
+              setDialog({
+                kind: "delete-subsection",
+                sectionId: menu.sectionId,
+                subsectionId: menu.subsectionId,
+                label: currentSubsection?.name,
+              });
+            }
+            setMenu(null);
           }}><Icon name="trash" size={21} />Удалить</button>
         </div>
       )}
@@ -688,13 +842,52 @@ export default function DiaryApp() {
             {sheet === "block" ? (
               <div className="editor-fields">
                 <input id="block-title" aria-label="Название записи" autoFocus value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Название записи" />
+                {draftTitle.trim() && (
+                  <div className="title-color-picker" role="group" aria-label="Цвет заголовка">
+                    {titleColorOptions.map((option) => (
+                      <button
+                        type="button"
+                        key={option.value}
+                        className={`color-swatch title-${option.value} ${draftTitleColor === option.value ? "selected" : ""}`}
+                        aria-label={option.label}
+                        aria-pressed={draftTitleColor === option.value}
+                        onClick={() => setDraftTitleColor(option.value)}
+                      />
+                    ))}
+                  </div>
+                )}
                 <textarea id="block-body" aria-label="Текст записи" value={draftBody} onChange={(event) => setDraftBody(event.target.value)} placeholder="Начните писать…" />
               </div>
             ) : (
-              <div className="name-field">
-                <label htmlFor="item-name">Название</label>
-                <input id="item-name" autoFocus value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder={sheet === "section" ? "Например, путешествия" : "Например, маршруты"} />
-              </div>
+              <>
+                <div className="name-field">
+                  <label htmlFor="item-name">Название</label>
+                  <input id="item-name" autoFocus value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder={sheet === "section" ? "Например, путешествия" : "Например, маршруты"} />
+                </div>
+                {sheet === "subsection" && (
+                  <fieldset className="icon-picker">
+                    <legend>Иконка подраздела</legend>
+                    <div>
+                      {subsectionIconOptions.map((option) => (
+                        <button
+                          type="button"
+                          key={`${option.icon}-${option.label}`}
+                          className={`icon-choice ${draftIcon === option.icon ? "selected" : ""}`}
+                          aria-label={option.label}
+                          aria-pressed={draftIcon === option.icon}
+                          onClick={() => {
+                            setDraftIcon(option.icon);
+                            setDraftAccent(option.accent);
+                            if (preferences.haptics) vibrate(8);
+                          }}
+                        >
+                          <span className={`tile-icon ${option.accent}`}><Icon name={option.icon} size={22} /></span>
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+              </>
             )}
           </form>
         </DraggableSheet>
@@ -803,14 +996,26 @@ export default function DiaryApp() {
       {dialog && (
         <div className="modal-layer centered" role="presentation">
           <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-            {dialog.kind === "delete-block" ? (
+            {dialog.kind.startsWith("delete-") ? (
               <>
                 <span className="dialog-icon danger-bg"><Icon name="trash" size={27} /></span>
-                <h2 id="dialog-title">Удалить запись?</h2>
-                <p>Это действие нельзя отменить. Запись будет удалена навсегда.</p>
+                <h2 id="dialog-title">
+                  {dialog.kind === "delete-section"
+                    ? "Удалить раздел?"
+                    : dialog.kind === "delete-subsection"
+                      ? "Удалить подраздел?"
+                      : "Удалить запись?"}
+                </h2>
+                <p>
+                  {dialog.kind === "delete-section"
+                    ? `Раздел «${dialog.label || "Без названия"}» и все записи внутри будут удалены навсегда.`
+                    : dialog.kind === "delete-subsection"
+                      ? `Подраздел «${dialog.label || "Без названия"}» и все его записи будут удалены навсегда.`
+                      : "Это действие нельзя отменить. Запись будет удалена навсегда."}
+                </p>
                 <div className="dialog-actions">
                   <button className="secondary-button" onClick={() => setDialog(null)}>Отмена</button>
-                  <button className="danger-button" onClick={deleteBlock}>Удалить</button>
+                  <button className="danger-button" onClick={confirmDelete}>Удалить</button>
                 </div>
               </>
             ) : (
@@ -843,6 +1048,54 @@ function ScreenHeader({ title, onBack }: { title: string; onBack: () => void }) 
     </header>
   );
 }
+
+function ContentHeader({
+  title,
+  onBack,
+  action,
+}: {
+  title: ReactNode;
+  onBack: () => void;
+  action?: ReactNode;
+}) {
+  return (
+    <header className="content-header">
+      <button className="content-back-button" onClick={onBack} aria-label="Назад">
+        <Icon name="back" size={25} />
+      </button>
+      <div className="content-header-title">{title}</div>
+      <div className="content-header-action">{action}</div>
+    </header>
+  );
+}
+
+type SortableRenderState = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners">;
+
+/* eslint-disable react-hooks/refs -- dnd-kit intentionally exposes bindings consumed while rendering sortable nodes. */
+function SortableSection({
+  id,
+  children,
+}: {
+  id: string;
+  children: (sortable: SortableRenderState) => ReactNode;
+}) {
+  const sortable = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+  };
+
+  return (
+    <section
+      ref={sortable.setNodeRef}
+      style={style}
+      className={`diary-section sortable-section ${sortable.isDragging ? "is-dragging" : ""}`}
+    >
+      {children({ attributes: sortable.attributes, listeners: sortable.listeners })}
+    </section>
+  );
+}
+/* eslint-enable react-hooks/refs */
 
 type SettingRow = { icon: IconName; label: string; accent: string; value?: string; onClick?: () => void };
 
@@ -954,7 +1207,43 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-function AuthPanel({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+function AuthGate({ onToast }: { onToast: (message: string) => void }) {
+  const [message, setMessage] = useState("");
+
+  const report = (nextMessage: string) => {
+    setMessage(nextMessage);
+    onToast(nextMessage);
+  };
+
+  return (
+    <main className="auth-gate">
+      <section className="auth-intro">
+        <span className="auth-mark"><Icon name="pen" size={30} /></span>
+        <p className="eyebrow">{todayLabel()}</p>
+        <h1>Дневник</h1>
+        <p>Личное пространство для мыслей, планов и проектов. Ваш дневник откроется после входа.</p>
+        <div className="auth-benefits" aria-hidden="true">
+          <span><Icon name="shield" size={19} />Приватно</span>
+          <span><Icon name="archive" size={19} />Всегда под рукой</span>
+        </div>
+      </section>
+      <section className="auth-card">
+        <AuthPanel onClose={() => undefined} onToast={report} embedded />
+        {message && <div className="auth-message" role="status">{message}</div>}
+      </section>
+    </main>
+  );
+}
+
+function AuthPanel({
+  onClose,
+  onToast,
+  embedded = false,
+}: {
+  onClose: () => void;
+  onToast: (message: string) => void;
+  embedded?: boolean;
+}) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -1020,7 +1309,7 @@ function AuthPanel({ onClose, onToast }: { onClose: () => void; onToast: (messag
         return;
       }
       onToast(data.session ? "Аккаунт создан" : "Проверьте почту и подтвердите регистрацию");
-      onClose();
+      if (data.session || !embedded) onClose();
       return;
     }
 
@@ -1040,11 +1329,18 @@ function AuthPanel({ onClose, onToast }: { onClose: () => void; onToast: (messag
 
   return (
     <form className="auth-panel" onSubmit={submitAuth}>
-      <div className="sheet-header panel-header">
-        <button type="button" className="text-button muted-action" onClick={onClose}>Закрыть</button>
-        <strong>{mode === "register" ? "Регистрация" : "Вход"}</strong>
-        <button type="submit" className="text-button" disabled={submitting}>{submitting ? "…" : "Готово"}</button>
-      </div>
+      {embedded ? (
+        <div className="auth-card-heading">
+          <span>Добро пожаловать</span>
+          <h2>{mode === "register" ? "Создайте аккаунт" : "Войдите в дневник"}</h2>
+        </div>
+      ) : (
+        <div className="sheet-header panel-header">
+          <button type="button" className="text-button muted-action" onClick={onClose}>Закрыть</button>
+          <strong>{mode === "register" ? "Регистрация" : "Вход"}</strong>
+          <button type="submit" className="text-button" disabled={submitting}>{submitting ? "…" : "Готово"}</button>
+        </div>
+      )}
       <div className="auth-tabs" role="tablist">
         <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
         <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
@@ -1075,52 +1371,37 @@ function AuthPanel({ onClose, onToast }: { onClose: () => void; onToast: (messag
   );
 }
 
-function SwipeBlock({
+/* eslint-disable react-hooks/refs -- dnd-kit intentionally exposes bindings consumed while rendering sortable nodes. */
+function SortableSwipeBlock({
   block,
-  index,
   hidePreview,
   onArchive,
   onDelete,
-  onReorderStart,
-  onReorderMove,
-  onReorderEnd,
 }: {
   block: Block;
-  index: number;
   hidePreview: boolean;
   onArchive: () => void;
   onDelete: () => void;
-  onReorderStart: (index: number, pointerId: number) => void;
-  onReorderMove: (event: ReactPointerEvent<HTMLElement>) => void;
-  onReorderEnd: () => void;
 }) {
   const [offset, setOffset] = useState(0);
-  const [dragging, setDragging] = useState(false);
+  const sortable = useSortable({ id: block.id });
   const start = useRef({ x: 0, y: 0 });
   const offsetRef = useRef(0);
   const pointerId = useRef<number | null>(null);
-  const gesture = useRef<"pending" | "swipe" | "scroll" | "reorder" | null>(null);
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearHold = () => {
-    if (holdTimer.current) clearTimeout(holdTimer.current);
-    holdTimer.current = null;
-  };
+  const gesture = useRef<"pending" | "swipe" | "scroll" | null>(null);
+  const { onPointerDown: sortablePointerDown, ...sortableListeners } = sortable.listeners || {};
 
   const reset = () => {
-    clearHold();
     pointerId.current = null;
     gesture.current = null;
     offsetRef.current = 0;
     setOffset(0);
-    setDragging(false);
   };
 
   const finish = () => {
     const currentGesture = gesture.current;
     const currentOffset = offsetRef.current;
-    if (currentGesture === "reorder") onReorderEnd();
-    else if (currentGesture === "swipe" && currentOffset <= -88) {
+    if (currentGesture === "swipe" && currentOffset <= -88) {
       vibrate(18);
       onArchive();
     } else if (currentGesture === "swipe" && currentOffset >= 88) {
@@ -1130,59 +1411,58 @@ function SwipeBlock({
     reset();
   };
 
+  const sortableStyle = {
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+  };
+
   return (
     <div
-      className={`swipe-wrap ${offset < 0 ? "swiping-left" : offset > 0 ? "swiping-right" : ""} ${dragging ? "dragging" : ""}`}
-      data-block-index={index}
+      ref={sortable.setNodeRef}
+      style={sortableStyle}
+      className={`swipe-wrap sortable-block ${offset < 0 ? "swiping-left" : offset > 0 ? "swiping-right" : ""} ${sortable.isDragging ? "is-dragging" : ""}`}
       data-block-id={block.id}
     >
       <div className="swipe-action archive-action"><Icon name="archive" /><span>В архив</span></div>
       <div className="swipe-action delete-action"><Icon name="trash" /><span>Удалить</span></div>
       <article
-        className="note-block"
+        className={`note-block ${block.title ? "" : "no-title"}`}
         style={{ transform: `translateX(${offset}px)` }}
+        {...sortable.attributes}
+        {...sortableListeners}
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
           if (event.pointerType === "mouse" && event.button !== 0) return;
+          sortablePointerDown?.(event);
           start.current = { x: event.clientX, y: event.clientY };
           pointerId.current = event.pointerId;
           gesture.current = "pending";
-          event.currentTarget.setPointerCapture(event.pointerId);
-          holdTimer.current = setTimeout(() => {
-            gesture.current = "reorder";
-            setDragging(true);
-            onReorderStart(index, event.pointerId);
-          }, 390);
         }}
         onPointerMove={(event) => {
           if (pointerId.current !== event.pointerId || !gesture.current) return;
           const dx = event.clientX - start.current.x;
           const dy = event.clientY - start.current.y;
           if (gesture.current === "pending" && Math.hypot(dx, dy) > 9) {
-            clearHold();
             gesture.current = Math.abs(dx) > Math.abs(dy) * 1.15 ? "swipe" : "scroll";
+            if (gesture.current === "swipe") event.currentTarget.setPointerCapture(event.pointerId);
           }
           if (gesture.current === "swipe") {
             const next = Math.max(-132, Math.min(132, dx));
             offsetRef.current = next;
             setOffset(next);
-          } else if (gesture.current === "reorder") {
-            onReorderMove(event);
           }
         }}
         onPointerUp={finish}
-        onPointerCancel={() => {
-          if (gesture.current === "reorder") onReorderEnd();
-          reset();
-        }}
+        onPointerCancel={reset}
       >
         <div className="note-meta">
           <span>{block.createdAt}</span>
-          <span className="hold-hint"><Icon name="grip" size={18} />Удерживайте для переноса</span>
+          <span className="hold-hint"><Icon name="grip" size={18} />Потяните для переноса</span>
         </div>
-        <h2>{block.title}</h2>
+        {block.title && <h2 className={`title-${block.titleColor || "green"}`}>{block.title}</h2>}
         <p>{hidePreview ? "Текст скрыт настройками конфиденциальности" : block.body}</p>
       </article>
     </div>
   );
 }
+/* eslint-enable react-hooks/refs */

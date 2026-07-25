@@ -1,5 +1,10 @@
-const CACHE = "diary-shell-v2";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
+const CACHE = "diary-shell-v3";
+const BASE = self.registration.scope;
+const APP_SHELL = [
+  BASE,
+  new URL("manifest.webmanifest", BASE).href,
+  new URL("favicon.svg", BASE).href,
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL)));
@@ -22,6 +27,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match(BASE)))
   );
 });

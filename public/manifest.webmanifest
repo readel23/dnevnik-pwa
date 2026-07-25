@@ -2,7 +2,7 @@
   "name": "Дневник — заметки и проекты",
   "short_name": "Дневник",
   "description": "Личный дневник, заметки и проекты — всегда под рукой.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#07090c",
   "theme_color": "#07090c",
@@ -10,7 +10,7 @@
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
