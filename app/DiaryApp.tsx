@@ -25,6 +25,15 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { isSupabaseConfigured, supabase } from "./supabase";
+import ProjectModule from "./ProjectModule";
+import type { EnabledModules, Project } from "./project-types";
+import { emptyProjects } from "./project-types";
+import {
+  CloudState,
+  loadCloudState,
+  saveCloudState,
+  subscribeToCloudState,
+} from "./cloud-sync";
 
 type IconName =
   | "plus" | "user" | "more" | "chevron" | "back" | "checklist"
@@ -157,9 +166,11 @@ const initialData: AppData = {
 };
 
 const storageKey = "diary-pwa-state-v1";
+const cloudCacheKey = "diary-pwa-cloud-state-v2";
+const legacyOwnerKey = "diary-pwa-legacy-owner";
 const themes = ["dark", "light", "system"] as const;
 type Theme = typeof themes[number];
-type ProfilePanel = "account" | "subscription" | "notifications" | "privacy" | "language" | "help" | "about";
+type ProfilePanel = "account" | "modules" | "subscription" | "notifications" | "privacy" | "language" | "help" | "about";
 type Preferences = {
   haptics: boolean;
   reminders: boolean;
@@ -175,6 +186,14 @@ const defaultPreferences: Preferences = {
   hidePreviews: false,
   language: "ru",
 };
+
+const defaultModules: EnabledModules = {
+  notes: true,
+  projects: true,
+};
+
+type UserCloudState = CloudState<AppData, Preferences, Theme>;
+type SyncStatus = "idle" | "saving" | "saved" | "offline" | "error";
 
 const subsectionIconOptions: Array<{ icon: IconName; accent: string; label: string }> = [
   { icon: "folder", accent: "blue", label: "Папка" },
@@ -214,7 +233,13 @@ function todayLabel() {
 }
 
 export default function DiaryApp() {
-  const [data, setData] = useState<AppData>(initialData);
+  const [data, setData] = useState<AppData>({ sections: [] });
+  const [projects, setProjects] = useState<Project[]>(emptyProjects);
+  const [modules, setModules] = useState<EnabledModules>(defaultModules);
+  const [appMode, setAppMode] = useState<"notes" | "projects">("notes");
+  const [cloudReady, setCloudReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [syncRevision, setSyncRevision] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
   const [view, setView] = useState<"home" | "profile" | "subsection" | "archive">("home");
@@ -243,6 +268,9 @@ export default function DiaryApp() {
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressedRef = useRef(false);
+  const authUserIdRef = useRef<string | null>(null);
+  const applyingCloudSignatureRef = useRef("");
+  const latestCloudTimestampRef = useRef("");
   const dragSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 9 } }),
@@ -271,9 +299,13 @@ export default function DiaryApp() {
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data: sessionData }) => {
+      authUserIdRef.current = sessionData.session?.user.id ?? null;
       setAuthUser(sessionData.session?.user ?? null);
     }).finally(() => setAuthReady(true));
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUserId = session?.user.id ?? null;
+      if (authUserIdRef.current !== nextUserId) setCloudReady(false);
+      authUserIdRef.current = nextUserId;
       setAuthUser(session?.user ?? null);
       setAuthReady(true);
     });
@@ -281,9 +313,127 @@ export default function DiaryApp() {
   }, []);
 
   useEffect(() => {
+    if (!hydrated || !authUser || !supabase) {
+      return;
+    }
+
+    const cloudClient = supabase;
+    const userCacheKey = `${cloudCacheKey}:${authUser.id}`;
+    let disposed = false;
+    let channel: ReturnType<typeof subscribeToCloudState<UserCloudState>> = null;
+
+    const applyRemoteState = (remote: UserCloudState) => {
+      if (!remote || remote.version !== 2) return;
+      const signature = JSON.stringify(remote);
+      applyingCloudSignatureRef.current = signature;
+      localStorage.setItem(userCacheKey, signature);
+      setData(remote.notes || { sections: [] });
+      setProjects(Array.isArray(remote.projects) ? remote.projects : []);
+      setModules({ ...defaultModules, ...(remote.modules || {}) });
+      setPreferences({ ...defaultPreferences, ...(remote.preferences || {}) });
+      if (remote.theme && themes.includes(remote.theme)) setTheme(remote.theme);
+    };
+
+    const startCloud = async () => {
+      setSyncStatus(navigator.onLine ? "saving" : "offline");
+      const { record, error } = await loadCloudState<UserCloudState>(authUser);
+      if (disposed) return;
+      if (error) {
+        setSyncStatus(navigator.onLine ? "error" : "offline");
+      } else if (record?.state?.version === 2) {
+        latestCloudTimestampRef.current = record.updated_at;
+        applyRemoteState(record.state);
+        setSyncStatus("saved");
+      } else {
+        const cachedForUser = localStorage.getItem(userCacheKey);
+        const legacyOwner = localStorage.getItem(legacyOwnerKey);
+        const canMigrateLegacy = !legacyOwner || legacyOwner === authUser.id;
+        const seed: UserCloudState = cachedForUser
+          ? JSON.parse(cachedForUser)
+          : {
+              version: 2,
+              notes: canMigrateLegacy ? data : { sections: [] },
+              projects: canMigrateLegacy ? projects : [],
+              modules: canMigrateLegacy ? modules : defaultModules,
+              preferences: canMigrateLegacy ? preferences : defaultPreferences,
+              theme: canMigrateLegacy ? theme : "dark",
+            };
+        applyRemoteState(seed);
+        const result = await saveCloudState(authUser, seed);
+        if (disposed) return;
+        localStorage.setItem(userCacheKey, JSON.stringify(seed));
+        if (!legacyOwner) localStorage.setItem(legacyOwnerKey, authUser.id);
+        setSyncStatus(result.error ? "error" : "saved");
+      }
+
+      channel = subscribeToCloudState<UserCloudState>(authUser, (record) => {
+        if (!record.state || record.updated_at <= latestCloudTimestampRef.current) return;
+        latestCloudTimestampRef.current = record.updated_at;
+        applyRemoteState(record.state);
+        setSyncStatus("saved");
+      });
+      setCloudReady(true);
+    };
+
+    startCloud();
+    return () => {
+      disposed = true;
+      if (channel) cloudClient.removeChannel(channel);
+    };
+    // Initial local state is intentionally captured once after authentication.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?.id, hydrated]);
+
+  useEffect(() => {
     if (!hydrated) return;
     localStorage.setItem(storageKey, JSON.stringify(data));
   }, [data, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !authUser) return;
+    const cached: UserCloudState = { version: 2, notes: data, projects, modules, preferences, theme };
+    localStorage.setItem(`${cloudCacheKey}:${authUser.id}`, JSON.stringify(cached));
+  }, [authUser, data, hydrated, modules, preferences, projects, theme]);
+
+  useEffect(() => {
+    if (!cloudReady || !authUser || !supabase) return;
+    const nextState: UserCloudState = { version: 2, notes: data, projects, modules, preferences, theme };
+    const signature = JSON.stringify(nextState);
+    if (signature === applyingCloudSignatureRef.current) {
+      applyingCloudSignatureRef.current = "";
+      return;
+    }
+
+    if (!navigator.onLine) {
+      queueMicrotask(() => setSyncStatus("offline"));
+      return;
+    }
+    queueMicrotask(() => setSyncStatus("saving"));
+    const timer = window.setTimeout(async () => {
+      const result = await saveCloudState(authUser, nextState);
+      if (result.error) {
+        setSyncStatus(navigator.onLine ? "error" : "offline");
+      } else {
+        latestCloudTimestampRef.current = new Date().toISOString();
+        setSyncStatus("saved");
+      }
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [authUser, cloudReady, data, modules, preferences, projects, syncRevision, theme]);
+
+  useEffect(() => {
+    const online = () => {
+      setSyncStatus("saving");
+      setSyncRevision((value) => value + 1);
+    };
+    const offline = () => setSyncStatus("offline");
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -531,7 +681,17 @@ export default function DiaryApp() {
     if (preferences.haptics) vibrate(12);
   };
 
-  if (!hydrated || !authReady) return <div className="app-loading" aria-label="Загрузка"><span /></div>;
+  const toggleModule = (key: keyof EnabledModules) => {
+    const other: keyof EnabledModules = key === "notes" ? "projects" : "notes";
+    if (modules[key] && !modules[other]) return;
+    setModules((current) => ({ ...current, [key]: !current[key] }));
+    if (modules[key] && appMode === key) setAppMode(other);
+    if (preferences.haptics) vibrate(12);
+  };
+
+  if (!hydrated || !authReady || (authUser && supabase && !cloudReady)) {
+    return <div className="app-loading" aria-label="Загрузка"><span /></div>;
+  }
 
   if (!authUser) {
     return <AuthGate onToast={setToast} />;
@@ -541,7 +701,7 @@ export default function DiaryApp() {
     <div className="app-shell" onPointerDown={(event) => {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
-      {view === "home" && (
+      {view === "home" && appMode === "notes" && modules.notes && (
         <main className="screen home-screen">
           <header className="home-header">
             <div>
@@ -558,6 +718,13 @@ export default function DiaryApp() {
               </button>
             </div>
           </header>
+
+          {modules.projects && (
+            <div className="module-switcher" role="tablist" aria-label="Модули приложения">
+              <button className="active" role="tab" aria-selected="true"><Icon name="pen" size={18} />Заметки</button>
+              <button role="tab" aria-selected="false" onClick={() => setAppMode("projects")}><Icon name="cube" size={18} />Проекты</button>
+            </div>
+          )}
 
           {data.sections.length === 0 ? (
             <div className="home-empty-state">
@@ -644,6 +811,18 @@ export default function DiaryApp() {
         </main>
       )}
 
+      {view === "home" && appMode === "projects" && modules.projects && (
+        <ProjectModule
+          projects={projects}
+          onChange={setProjects}
+          onProfile={() => setView("profile")}
+          onNotes={() => setAppMode("notes")}
+          notesEnabled={modules.notes}
+          haptics={preferences.haptics}
+          syncStatus={syncStatus}
+        />
+      )}
+
       {view === "profile" && (
         <main className="screen profile-screen">
           <ScreenHeader title="Профиль" onBack={goHome} />
@@ -658,6 +837,7 @@ export default function DiaryApp() {
           </button>
           <SettingsGroup rows={[
             { icon: "user", label: "Аккаунт", accent: "blue", onClick: () => setProfilePanel("account") },
+            { icon: "cube", label: "Модули", accent: "green", value: `${Number(modules.notes) + Number(modules.projects)} из 2`, onClick: () => setProfilePanel("modules") },
             { icon: "crown", label: "Подписка", accent: "purple", value: "Базовая", onClick: () => setProfilePanel("subscription") },
             { icon: "bell", label: "Уведомления", accent: "orange", value: preferences.reminders ? "Вкл." : "Выкл.", onClick: () => setProfilePanel("notifications") },
             { icon: "shield", label: "Конфиденциальность", accent: "green", onClick: () => setProfilePanel("privacy") },
@@ -685,7 +865,7 @@ export default function DiaryApp() {
               setView("archive");
             } },
             { icon: "download", label: "Экспорт данных", accent: "green", onClick: () => {
-              const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data, preferences }, null, 2)], { type: "application/json" });
+              const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data, projects, modules, preferences }, null, 2)], { type: "application/json" });
               const link = document.createElement("a");
               link.href = URL.createObjectURL(blob);
               link.download = "diary-export.json";
@@ -696,7 +876,7 @@ export default function DiaryApp() {
           ]} />
           <SettingsGroup rows={[
             { icon: "help", label: "Помощь", accent: "amber", onClick: () => setProfilePanel("help") },
-            { icon: "info", label: "О приложении", accent: "blue", value: "v1.1", onClick: () => setProfilePanel("about") },
+            { icon: "info", label: "О приложении", accent: "blue", value: "v2.0", onClick: () => setProfilePanel("about") },
           ]} />
           <button className="logout-row" onClick={async () => {
             if (authUser && supabase) {
@@ -916,6 +1096,7 @@ export default function DiaryApp() {
           ) : (
             <PanelContent
               title={{
+                modules: "Модули",
                 subscription: "Подписка",
                 notifications: "Уведомления",
                 privacy: "Конфиденциальность",
@@ -925,10 +1106,40 @@ export default function DiaryApp() {
               }[profilePanel]}
               onClose={() => setProfilePanel(null)}
             >
+              {profilePanel === "modules" && (
+                <>
+                  <p className="panel-copy panel-intro">Оставьте только те инструменты, которыми пользуетесь. Данные выключенного модуля сохраняются и вернутся после повторного включения.</p>
+                  <div className="module-settings">
+                    <div>
+                      <span className="tile-icon green"><Icon name="pen" /></span>
+                      <span><strong>Дневник заметок</strong><small>Разделы, записи, архив и свободные блоки</small></span>
+                      <button
+                        className={`switch ${modules.notes ? "on" : ""}`}
+                        role="switch"
+                        aria-checked={modules.notes}
+                        disabled={modules.notes && !modules.projects}
+                        onClick={() => toggleModule("notes")}
+                      ><span /></button>
+                    </div>
+                    <div>
+                      <span className="tile-icon purple"><Icon name="cube" /></span>
+                      <span><strong>Ведение проектов</strong><small>Задачи, этапы, доска, сроки и аналитика</small></span>
+                      <button
+                        className={`switch ${modules.projects ? "on" : ""}`}
+                        role="switch"
+                        aria-checked={modules.projects}
+                        disabled={modules.projects && !modules.notes}
+                        onClick={() => toggleModule("projects")}
+                      ><span /></button>
+                    </div>
+                  </div>
+                  <p className="panel-copy">Хотя бы один модуль всегда должен оставаться включённым.</p>
+                </>
+              )}
               {profilePanel === "subscription" && (
                 <>
                   <div className="plan-card"><Icon name="crown" size={32} /><div><strong>Базовый план</strong><span>Все основные функции дневника доступны бесплатно.</span></div></div>
-                  <p className="panel-copy">Синхронизация между устройствами и расширенные резервные копии появятся в следующей версии.</p>
+                  <p className="panel-copy">Синхронизация между устройствами уже включена. Изменения сохраняются в вашей защищённой базе Supabase.</p>
                 </>
               )}
               {profilePanel === "notifications" && (
@@ -952,7 +1163,7 @@ export default function DiaryApp() {
                   <div className="toggle-list">
                     <ToggleRow label="Скрывать текст записей" value={preferences.hidePreviews} onChange={() => togglePreference("hidePreviews")} />
                   </div>
-                  <p className="panel-copy">Данные дневника хранятся локально на устройстве. Аккаунт Supabase используется только для регистрации и профиля.</p>
+                  <p className="panel-copy">Заметки, проекты и настройки хранятся в вашей учётной записи Supabase. На устройстве остаётся зашифрованная браузером локальная копия для работы без сети.</p>
                 </>
               )}
               {profilePanel === "language" && (

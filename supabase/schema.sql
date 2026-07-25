@@ -66,3 +66,54 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- One versioned document per user keeps notes, projects and preferences
+-- available offline and synchronized across every signed-in device.
+create table if not exists public.user_app_state (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  state jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_app_state enable row level security;
+
+drop policy if exists "Users read their own app state" on public.user_app_state;
+create policy "Users read their own app state"
+  on public.user_app_state for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users create their own app state" on public.user_app_state;
+create policy "Users create their own app state"
+  on public.user_app_state for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users update their own app state" on public.user_app_state;
+create policy "Users update their own app state"
+  on public.user_app_state for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users delete their own app state" on public.user_app_state;
+create policy "Users delete their own app state"
+  on public.user_app_state for delete
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+grant select, insert, update, delete on public.user_app_state to authenticated;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'user_app_state'
+  ) then
+    alter publication supabase_realtime add table public.user_app_state;
+  end if;
+end
+$$;
