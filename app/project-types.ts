@@ -67,6 +67,7 @@ export type ProjectNote = {
   body: string;
   color: "green" | "blue" | "purple" | "orange" | "pink" | "neutral";
   createdAt: string;
+  archived?: boolean;
 };
 
 export type ProjectDocument = {

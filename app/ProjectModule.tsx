@@ -68,7 +68,8 @@ const paths = {
   grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
   trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 14h10l1-14"],
   edit: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z", "m14.5 7.5 3 3"],
-  star: ["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"],
+  archive: ["M4 7h16", "M5 7v13h14V7", "M3 3h18v4H3Z", "M10 12h4"],
+  restore: ["M3 12a9 9 0 1 0 3-6.7", "M3 4v5h5"],
   code: ["m8 9-4 3 4 3", "m16 9 4 3-4 3", "m14 5-4 14"],
   book: ["M4 5a3 3 0 0 1 3-3h13v17H7a3 3 0 0 0-3 3Z", "M4 5v17", "M8 7h8"],
   plane: ["M22 2 9 15l-6 1 4 2 2 4 1-6Z", "M9 15 13 2"],
@@ -76,9 +77,6 @@ const paths = {
   wallet: ["M3 6a3 3 0 0 1 3-3h12v18H6a3 3 0 0 1-3-3Z", "M3 7h15", "M15 12h6v5h-6a2.5 2.5 0 0 1 0-5Z"],
   rocket: ["M14 4c4-3 7-2 7-2s1 3-2 7l-7 7-5-5Z", "m9 14-5 1 1-5", "m14 9 5 5-1 5"],
   spark: ["m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"],
-  heading: ["M5 5v14", "M19 5v14", "M5 12h14"],
-  list: ["M9 6h11", "M9 12h11", "M9 18h11", "M4 6h.01", "M4 12h.01", "M4 18h.01"],
-  quote: ["M6 17h4l2-5V7H5v6h4", "M15 17h4l2-5V7h-7v6h4"],
 } as const;
 
 type IconName = keyof typeof paths;
@@ -143,11 +141,12 @@ export default function ProjectModule({
   const [noteDraft, setNoteDraft] = useState<ProjectNote | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressed = useRef(false);
+  const moduleSwipe = useRef<{ x: number; y: number; pointerId: number } | null>(null);
 
   const activeProject = projects.find((project) => project.id === activeId);
   const shownProjects = projects
     .filter((project) => !query.trim() || `${project.name} ${project.description}`.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt));
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   const updateProject = (id: string, updater: (project: Project) => Project) => {
     onChange(projects.map((project) => project.id === id
@@ -248,7 +247,6 @@ export default function ProjectModule({
       }}>
         <header className="project-detail-header simple">
           <button className="project-back" aria-label="Назад к проектам" onClick={() => setActiveId(null)}><Icon name="back" /></button>
-          <span className={`project-symbol ${activeProject.accent}`}><Icon name={activeProject.icon} size={23} /></span>
           <div className="project-title-copy"><span>Проект</span><h1>{activeProject.name}</h1></div>
           <button className="project-more" aria-label="Меню проекта" onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
@@ -323,10 +321,8 @@ export default function ProjectModule({
         )}
 
         {projectMenu && <ProjectContextMenu
-          project={activeProject}
           position={projectMenu}
           onRename={() => { setRenameProject({ id: activeProject.id, name: activeProject.name }); setProjectMenu(null); }}
-          onFavorite={() => { updateProject(activeProject.id, (item) => ({ ...item, favorite: !item.favorite })); setProjectMenu(null); }}
           onDelete={() => { setConfirm({ kind: "project", projectId: activeProject.id, label: activeProject.name }); setProjectMenu(null); }}
         />}
         {renameProject && <RenameProjectSheet value={renameProject} onChange={setRenameProject} onClose={() => setRenameProject(null)} onSave={() => {
@@ -340,11 +336,30 @@ export default function ProjectModule({
   }
 
   return (
-    <main className="screen projects-screen clean-projects-screen" onPointerDown={(event) => {
-      if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu")) setProjectMenu(null);
-    }}>
+    <main
+      className="screen projects-screen clean-projects-screen"
+      onPointerDown={(event) => {
+        if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu")) setProjectMenu(null);
+        if (
+          event.pointerType === "touch"
+          && !(event.target as HTMLElement).closest("button, input, textarea, select, [role='dialog'], .project-card")
+        ) moduleSwipe.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+      }}
+      onPointerUp={(event) => {
+        const start = moduleSwipe.current;
+        moduleSwipe.current = null;
+        if (!start || start.pointerId !== event.pointerId || !notesEnabled) return;
+        const dx = event.clientX - start.x;
+        const dy = event.clientY - start.y;
+        if (dx > 72 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+          onNotes();
+          pulse(haptics, 10);
+        }
+      }}
+      onPointerCancel={() => { moduleSwipe.current = null; }}
+    >
       <header className="projects-header">
-        <div><p className="eyebrow">Рабочее пространство</p><h1>Проекты</h1><p className="projects-subtitle">Доски, заметки и документы без лишнего.</p></div>
+        <div><p className="eyebrow">Рабочее пространство</p><h1>Проекты</h1></div>
         <div className="header-actions">
           <button className="round-button" aria-label="Создать проект" onClick={() => setCreateOpen(true)}><Icon name="plus" size={27} /></button>
           <button className="round-button" aria-label="Открыть профиль" onClick={onProfile}><Icon name="user" size={26} /></button>
@@ -377,8 +392,7 @@ export default function ProjectModule({
                   onPointerLeave={stopProjectLongPress}
                 >
                   <span className={`project-symbol ${project.accent}`}><Icon name={project.icon} size={23} /></span>
-                  <span><strong>{project.name}</strong><small>{columns.length} групп · {done}/{tasks.length} выполнено</small></span>
-                  {project.favorite && <Icon name="star" size={17} />}
+                  <span className="project-card-copy"><strong>{project.name}</strong><small>{columns.length} групп · {done}/{tasks.length} выполнено</small></span>
                   <Icon name="chevron" size={20} />
                 </button>
                 <button className="project-card-menu-button" aria-label={`Меню проекта ${project.name}`} onClick={(event) => {
@@ -420,10 +434,8 @@ export default function ProjectModule({
         const project = projects.find((item) => item.id === projectMenu.projectId);
         if (!project) return null;
         return <ProjectContextMenu
-          project={project}
           position={projectMenu}
           onRename={() => { setRenameProject({ id: project.id, name: project.name }); setProjectMenu(null); }}
-          onFavorite={() => { updateProject(project.id, (item) => ({ ...item, favorite: !item.favorite })); setProjectMenu(null); }}
           onDelete={() => { setConfirm({ kind: "project", projectId: project.id, label: project.name }); setProjectMenu(null); }}
         />;
       })()}
@@ -434,22 +446,17 @@ export default function ProjectModule({
 }
 
 function ProjectContextMenu({
-  project,
   position,
   onRename,
-  onFavorite,
   onDelete,
 }: {
-  project: Project;
   position: { x: number; y: number };
   onRename: () => void;
-  onFavorite: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="project-context-menu" role="menu" style={{ left: position.x, top: position.y }}>
       <button role="menuitem" onClick={onRename}><Icon name="edit" size={19} />Переименовать</button>
-      <button role="menuitem" onClick={onFavorite}><Icon name="star" size={19} />{project.favorite ? "Убрать из избранного" : "В избранное"}</button>
       <button role="menuitem" className="danger" onClick={onDelete}><Icon name="trash" size={19} />Удалить</button>
     </div>
   );
@@ -703,7 +710,9 @@ function ProjectNotes({
   onCreate: () => void;
   haptics: boolean;
 }) {
+  const [showArchive, setShowArchive] = useState(false);
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }));
+  const visibleNotes = notes.filter((note) => Boolean(note.archived) === showArchive);
   return (
     <DndContext sensors={sensors} autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }} onDragStart={() => pulse(haptics, 18)} onDragEnd={(event) => {
       if (!event.over || event.active.id === event.over.id) return;
@@ -711,24 +720,53 @@ function ProjectNotes({
       const to = notes.findIndex((note) => note.id === event.over?.id);
       if (from >= 0 && to >= 0) onChange(arrayMove(notes, from, to));
     }}>
-      <SortableContext items={notes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
+      <div className="project-notes-header">
+        <div><strong>{showArchive ? "Архив заметок" : "Заметки проекта"}</strong><span>{visibleNotes.length}</span></div>
+        <button onClick={() => setShowArchive((value) => !value)}><Icon name={showArchive ? "back" : "archive"} size={18} />{showArchive ? "К заметкам" : `Архив · ${notes.filter((note) => note.archived).length}`}</button>
+      </div>
+      <SortableContext items={visibleNotes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
         <div className="project-notes-grid">
-          {notes.map((note) => <SortableProjectNote note={note} key={note.id} onEdit={() => onEdit(note)} onDelete={() => onDelete(note)} />)}
+          {visibleNotes.map((note) => <SortableProjectNote
+            note={note}
+            key={note.id}
+            archived={showArchive}
+            onEdit={() => onEdit(note)}
+            onArchive={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: true } : item))}
+            onRestore={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: false } : item))}
+            onDelete={() => onDelete(note)}
+          />)}
         </div>
       </SortableContext>
-      {!notes.length && <div className="workspace-empty"><span><Icon name="note" size={29} /></span><h2>Заметок пока нет</h2><p>Добавляйте отдельные смысловые блоки и свободно меняйте их порядок.</p></div>}
-      <button className="project-fab" aria-label="Создать заметку" onClick={onCreate}><Icon name="plus" size={27} /></button>
+      {!visibleNotes.length && <div className="workspace-empty"><span><Icon name={showArchive ? "archive" : "note"} size={29} /></span><h2>{showArchive ? "Архив пуст" : "Заметок пока нет"}</h2><p>{showArchive ? "Сюда можно убрать завершённые или временно ненужные заметки." : "Добавляйте отдельные смысловые блоки и свободно меняйте их порядок."}</p></div>}
+      {!showArchive && <button className="project-fab" aria-label="Создать заметку" onClick={onCreate}><Icon name="plus" size={27} /></button>}
     </DndContext>
   );
 }
 
-function SortableProjectNote({ note, onEdit, onDelete }: { note: ProjectNote; onEdit: () => void; onDelete: () => void }) {
+function SortableProjectNote({
+  note,
+  archived,
+  onEdit,
+  onArchive,
+  onRestore,
+  onDelete,
+}: {
+  note: ProjectNote;
+  archived: boolean;
+  onEdit: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
+  onDelete: () => void;
+}) {
   const sortable = useSortable({ id: note.id });
   return (
     <article ref={sortable.setNodeRef} className={`project-note-card ${sortable.isDragging ? "dragging" : ""}`} style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }} {...sortable.attributes} {...sortable.listeners}>
       <div className="project-note-meta"><span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span><Icon name="grip" size={17} /></div>
       <button className="project-note-open" onPointerDown={(event) => event.stopPropagation()} onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
-      <button className="project-note-delete" aria-label="Удалить заметку" onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}><Icon name="trash" size={17} /></button>
+      <div className="project-note-actions">
+        <button aria-label={archived ? "Восстановить заметку" : "Переместить заметку в архив"} onPointerDown={(event) => event.stopPropagation()} onClick={archived ? onRestore : onArchive}><Icon name={archived ? "restore" : "archive"} size={17} /></button>
+        <button className="danger" aria-label="Удалить заметку" onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}><Icon name="trash" size={17} /></button>
+      </div>
     </article>
   );
 }
@@ -746,11 +784,19 @@ function DocumentWorkspace({
   haptics: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [create, setCreate] = useState<{ type: "folder" | "page"; parentId: string | null } | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [rename, setRename] = useState<ProjectDocument | null>(null);
   const selected = documents.find((document) => document.id === selectedId && document.type === "page");
+  const activeFolderId = documents.some((document) => document.id === selectedFolderId && document.type === "folder")
+    ? selectedFolderId
+    : null;
+  const documentSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+  );
 
   const addDocument = (event: FormEvent) => {
     event.preventDefault();
@@ -770,45 +816,95 @@ function DocumentWorkspace({
     onChange(documents.map((document) => document.id === selected.id ? { ...document, ...patch, updatedAt: new Date().toISOString() } : document));
   };
 
-  const insert = (prefix: string) => updateSelected({ content: `${selected?.content || ""}${selected?.content ? "\n" : ""}${prefix}` });
+  const moveDocument = (event: DragEndEvent) => {
+    document.body.classList.remove("is-reordering");
+    if (!event.over || event.active.id === event.over.id) return;
+    const sourceId = String(event.active.id);
+    const targetId = String(event.over.id);
+    const source = documents.find((document) => document.id === sourceId);
+    if (!source) return;
+
+    let nextParentId: string | null = null;
+    let insertBeforeId: string | null = null;
+    if (targetId !== "document-root") {
+      const target = documents.find((document) => document.id === targetId);
+      if (!target) return;
+      if (target.type === "folder") {
+        let parentId: string | null = target.id;
+        while (parentId) {
+          if (parentId === source.id) return;
+          parentId = documents.find((document) => document.id === parentId)?.parentId || null;
+        }
+        nextParentId = target.id;
+        setExpanded((current) => new Set(current).add(target.id));
+      } else {
+        nextParentId = target.parentId;
+        insertBeforeId = target.id;
+      }
+    }
+
+    let parentCheck = nextParentId;
+    while (parentCheck) {
+      if (parentCheck === source.id) return;
+      parentCheck = documents.find((document) => document.id === parentCheck)?.parentId || null;
+    }
+
+    const patched = documents.map((document) => document.id === source.id
+      ? { ...document, parentId: nextParentId, updatedAt: new Date().toISOString() }
+      : document);
+    if (insertBeforeId) {
+      const from = patched.findIndex((document) => document.id === source.id);
+      const to = patched.findIndex((document) => document.id === insertBeforeId);
+      onChange(from >= 0 && to >= 0 ? arrayMove(patched, from, to) : patched);
+    } else {
+      onChange(patched);
+    }
+    setSelectedFolderId(nextParentId);
+    pulse(haptics, [10, 20, 10]);
+  };
 
   return (
     <div className={`document-workspace ${selected ? "page-open" : ""}`}>
-      <aside className="document-tree">
-        <div className="document-tree-head"><strong>Документы</strong><div><button aria-label="Новая страница" onClick={() => { setCreate({ type: "page", parentId: null }); setNewTitle(""); }}><Icon name="page" size={18} /></button><button aria-label="Новая папка" onClick={() => { setCreate({ type: "folder", parentId: null }); setNewTitle(""); }}><Icon name="folderPlus" size={18} /></button></div></div>
-        <DocumentLevel
-          parentId={null}
+      <DndContext
+        sensors={documentSensors}
+        collisionDetection={closestCorners}
+        autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 10, interval: 5 }}
+        onDragStart={() => { document.body.classList.add("is-reordering"); pulse(haptics, 16); }}
+        onDragCancel={() => document.body.classList.remove("is-reordering")}
+        onDragEnd={moveDocument}
+      >
+        <DocumentTreeRoot
           documents={documents}
           expanded={expanded}
           selectedId={selectedId}
+          selectedFolderId={activeFolderId}
           onToggle={(id) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
-          onOpen={setSelectedId}
+          onSelectFolder={(id) => {
+            setSelectedFolderId(id);
+            setSelectedId(null);
+            setExpanded((current) => new Set(current).add(id));
+          }}
+          onSelectRoot={() => { setSelectedFolderId(null); setSelectedId(null); }}
+          onOpen={(id) => {
+            const page = documents.find((document) => document.id === id);
+            setSelectedId(id);
+            setSelectedFolderId(page?.parentId || null);
+          }}
           onAdd={(type, parentId) => { setCreate({ type, parentId }); setNewTitle(""); }}
+          onCreateRoot={(type) => { setCreate({ type, parentId: activeFolderId }); setNewTitle(""); }}
           onRename={setRename}
           onDelete={onConfirmDelete}
         />
-        {!documents.length && <div className="document-tree-empty"><Icon name="page" size={26} /><span>Создайте папку или первую страницу</span></div>}
-      </aside>
+      </DndContext>
       <section className="document-editor">
         {selected ? (
           <>
             <header className="document-editor-mobile-head"><button onClick={() => setSelectedId(null)}><Icon name="back" size={21} />Документы</button></header>
-            <div className="document-breadcrumbs"><span>{documents.find((node) => node.id === selected.parentId)?.title || "Проект"}</span><Icon name="chevron" size={15} /><strong>{selected.title || "Без названия"}</strong></div>
             <input className="document-title" aria-label="Название документа" value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} placeholder="Без названия" />
-            <div className="document-toolbar" aria-label="Инструменты документа">
-              <button onClick={() => insert("# ")} title="Заголовок"><Icon name="heading" size={18} /></button>
-              <button onClick={() => insert("- ")} title="Список"><Icon name="list" size={18} /></button>
-              <button onClick={() => insert("- [ ] ")} title="Задача"><Icon name="check" size={18} /></button>
-              <button onClick={() => insert("> ")} title="Цитата"><Icon name="quote" size={18} /></button>
-              <select aria-label="Переместить в папку" value={selected.parentId || ""} onChange={(event) => updateSelected({ parentId: event.target.value || null })}>
-                <option value="">В корне проекта</option>
-                {documents.filter((node) => node.type === "folder" && node.id !== selected.id).map((folder) => <option value={folder.id} key={folder.id}>{folder.title}</option>)}
-              </select>
-            </div>
-            <textarea className="document-content" aria-label="Содержимое документа" value={selected.content} onChange={(event) => updateSelected({ content: event.target.value })} placeholder={"Начните писать…\n\nПоддерживается Markdown: # заголовок, - список, - [ ] задача"} />
-            <span className="document-saved">Сохраняется автоматически</span>
+            <textarea className="document-content" aria-label="Содержимое документа" value={selected.content} onChange={(event) => updateSelected({ content: event.target.value })} placeholder="Начните писать…" />
+            <span className="document-saved">Сохранено</span>
           </>
-        ) : <div className="document-placeholder"><span><Icon name="page" size={32} /></span><h2>Выберите документ</h2><p>Или создайте новую страницу в дереве слева.</p></div>}
+        ) : <div className="document-placeholder"><span><Icon name="page" size={32} /></span><h2>{activeFolderId ? "Папка выбрана" : "Выберите документ"}</h2><p>{activeFolderId ? "Новая страница будет создана внутри этой папки." : "Создайте страницу или откройте существующую."}</p></div>}
       </section>
 
       {create && <Sheet onClose={() => setCreate(null)} compact><form onSubmit={addDocument}><div className="project-sheet-header"><button type="button" onClick={() => setCreate(null)}>Отмена</button><strong>{create.type === "folder" ? "Новая папка" : "Новая страница"}</strong><button type="submit">Создать</button></div><div className="project-sheet-scroll"><label className="project-field"><span>Название</span><input autoFocus value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={create.type === "folder" ? "Название папки" : "Название документа"} /></label></div></form></Sheet>}
@@ -817,12 +913,73 @@ function DocumentWorkspace({
   );
 }
 
+/* eslint-disable react-hooks/refs -- dnd-kit droppable bindings are consumed during render. */
+function DocumentTreeRoot({
+  documents,
+  expanded,
+  selectedId,
+  selectedFolderId,
+  onToggle,
+  onSelectFolder,
+  onSelectRoot,
+  onOpen,
+  onAdd,
+  onCreateRoot,
+  onRename,
+  onDelete,
+}: {
+  documents: ProjectDocument[];
+  expanded: Set<string>;
+  selectedId: string | null;
+  selectedFolderId: string | null;
+  onToggle: (id: string) => void;
+  onSelectFolder: (id: string) => void;
+  onSelectRoot: () => void;
+  onOpen: (id: string) => void;
+  onAdd: (type: "folder" | "page", parentId: string) => void;
+  onCreateRoot: (type: "folder" | "page") => void;
+  onRename: (document: ProjectDocument) => void;
+  onDelete: (document: ProjectDocument) => void;
+}) {
+  const root = useDroppable({ id: "document-root", data: { type: "document-root" } });
+  return (
+    <aside ref={root.setNodeRef} className={`document-tree ${root.isOver ? "is-over-root" : ""}`}>
+      <div className="document-tree-head">
+        <button className="document-root-button" onClick={onSelectRoot}><strong>Документы</strong></button>
+        <div>
+          <button aria-label="Новая страница" onClick={() => onCreateRoot("page")}><Icon name="page" size={18} /></button>
+          <button aria-label="Новая папка" onClick={() => onCreateRoot("folder")}><Icon name="folderPlus" size={18} /></button>
+        </div>
+      </div>
+      <SortableContext items={documents.map((document) => document.id)} strategy={verticalListSortingStrategy}>
+        <DocumentLevel
+          parentId={null}
+          documents={documents}
+          expanded={expanded}
+          selectedId={selectedId}
+          selectedFolderId={selectedFolderId}
+          onToggle={onToggle}
+          onSelectFolder={onSelectFolder}
+          onOpen={onOpen}
+          onAdd={onAdd}
+          onRename={onRename}
+          onDelete={onDelete}
+        />
+      </SortableContext>
+      {!documents.length && <div className="document-tree-empty"><Icon name="page" size={26} /><span>Создайте папку или первую страницу</span></div>}
+    </aside>
+  );
+}
+/* eslint-enable react-hooks/refs */
+
 function DocumentLevel({
   parentId,
   documents,
   expanded,
   selectedId,
+  selectedFolderId,
   onToggle,
+  onSelectFolder,
   onOpen,
   onAdd,
   onRename,
@@ -832,7 +989,9 @@ function DocumentLevel({
   documents: ProjectDocument[];
   expanded: Set<string>;
   selectedId: string | null;
+  selectedFolderId: string | null;
   onToggle: (id: string) => void;
+  onSelectFolder: (id: string) => void;
   onOpen: (id: string) => void;
   onAdd: (type: "folder" | "page", parentId: string) => void;
   onRename: (document: ProjectDocument) => void;
@@ -841,28 +1000,84 @@ function DocumentLevel({
   return (
     <div className="document-level">
       {documents.filter((document) => document.parentId === parentId).map((document) => (
-        <div className="document-node-wrap" key={document.id}>
-          <div className={`document-node ${selectedId === document.id ? "selected" : ""}`}>
-            <button className="document-node-main" onClick={() => document.type === "folder" ? onToggle(document.id) : onOpen(document.id)}>
-              {document.type === "folder" ? <Icon name={expanded.has(document.id) ? "down" : "chevron"} size={16} /> : <span />}
-              <Icon name={document.type === "folder" ? "folder" : "page"} size={18} />
-              <span>{document.title || "Без названия"}</span>
-            </button>
-            <details>
-              <summary aria-label={`Меню ${document.title}`}><Icon name="more" size={18} /></summary>
-              <div>
-                {document.type === "folder" && <><button onClick={() => onAdd("page", document.id)}><Icon name="page" size={16} />Страница</button><button onClick={() => onAdd("folder", document.id)}><Icon name="folderPlus" size={16} />Папка</button></>}
-                <button onClick={() => onRename(document)}><Icon name="edit" size={16} />Переименовать</button>
-                <button className="danger" onClick={() => onDelete(document)}><Icon name="trash" size={16} />Удалить</button>
-              </div>
-            </details>
-          </div>
-          {document.type === "folder" && expanded.has(document.id) && <DocumentLevel parentId={document.id} documents={documents} expanded={expanded} selectedId={selectedId} onToggle={onToggle} onOpen={onOpen} onAdd={onAdd} onRename={onRename} onDelete={onDelete} />}
-        </div>
+        <SortableDocumentNode
+          document={document}
+          documents={documents}
+          expanded={expanded}
+          selectedId={selectedId}
+          selectedFolderId={selectedFolderId}
+          onToggle={onToggle}
+          onSelectFolder={onSelectFolder}
+          onOpen={onOpen}
+          onAdd={onAdd}
+          onRename={onRename}
+          onDelete={onDelete}
+          key={document.id}
+        />
       ))}
     </div>
   );
 }
+
+/* eslint-disable react-hooks/refs -- dnd-kit sortable bindings are consumed during render. */
+function SortableDocumentNode({
+  document,
+  documents,
+  expanded,
+  selectedId,
+  selectedFolderId,
+  onToggle,
+  onSelectFolder,
+  onOpen,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  document: ProjectDocument;
+  documents: ProjectDocument[];
+  expanded: Set<string>;
+  selectedId: string | null;
+  selectedFolderId: string | null;
+  onToggle: (id: string) => void;
+  onSelectFolder: (id: string) => void;
+  onOpen: (id: string) => void;
+  onAdd: (type: "folder" | "page", parentId: string) => void;
+  onRename: (document: ProjectDocument) => void;
+  onDelete: (document: ProjectDocument) => void;
+}) {
+  const sortable = useSortable({ id: document.id, data: { type: "document", documentType: document.type } });
+  return (
+    <div
+      ref={sortable.setNodeRef}
+      className={`document-node-wrap ${sortable.isDragging ? "dragging" : ""}`}
+      style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+    >
+      <div className={`document-node ${selectedId === document.id || selectedFolderId === document.id ? "selected" : ""} ${sortable.isOver && document.type === "folder" ? "drop-target" : ""}`}>
+        <button
+          className="document-node-main"
+          onClick={() => document.type === "folder" ? onSelectFolder(document.id) : onOpen(document.id)}
+          {...sortable.attributes}
+          {...sortable.listeners}
+        >
+          {document.type === "folder" ? <span className="document-disclosure" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(document.id); }}><Icon name={expanded.has(document.id) ? "down" : "chevron"} size={16} /></span> : <span />}
+          <Icon name={document.type === "folder" ? "folder" : "page"} size={18} />
+          <span>{document.title || "Без названия"}</span>
+          <Icon name="grip" size={16} />
+        </button>
+        <details onPointerDown={(event) => event.stopPropagation()}>
+          <summary aria-label={`Меню ${document.title}`}><Icon name="more" size={18} /></summary>
+          <div>
+            {document.type === "folder" && <><button onClick={() => onAdd("page", document.id)}><Icon name="page" size={16} />Страница</button><button onClick={() => onAdd("folder", document.id)}><Icon name="folderPlus" size={16} />Папка</button></>}
+            <button onClick={() => onRename(document)}><Icon name="edit" size={16} />Переименовать</button>
+            <button className="danger" onClick={() => onDelete(document)}><Icon name="trash" size={16} />Удалить</button>
+          </div>
+        </details>
+      </div>
+      {document.type === "folder" && expanded.has(document.id) && <DocumentLevel parentId={document.id} documents={documents} expanded={expanded} selectedId={selectedId} selectedFolderId={selectedFolderId} onToggle={onToggle} onSelectFolder={onSelectFolder} onOpen={onOpen} onAdd={onAdd} onRename={onRename} onDelete={onDelete} />}
+    </div>
+  );
+}
+/* eslint-enable react-hooks/refs */
 
 function Sheet({ children, onClose, compact = false }: { children: ReactNode; onClose: () => void; compact?: boolean }) {
   const [offset, setOffset] = useState(0);

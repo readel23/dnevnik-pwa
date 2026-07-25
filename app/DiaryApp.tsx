@@ -273,6 +273,7 @@ export default function DiaryApp() {
   const authUserIdRef = useRef<string | null>(null);
   const applyingCloudSignatureRef = useRef("");
   const latestCloudTimestampRef = useRef("");
+  const moduleSwipeRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const dragSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 9 } }),
@@ -714,6 +715,26 @@ export default function DiaryApp() {
     if (preferences.haptics) vibrate(12);
   };
 
+  const startModuleSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      event.pointerType !== "touch"
+      || (event.target as HTMLElement).closest("button, input, textarea, select, [role='dialog'], .sortable-section")
+    ) return;
+    moduleSwipeRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+  };
+
+  const finishModuleSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+    const start = moduleSwipeRef.current;
+    moduleSwipeRef.current = null;
+    if (!start || start.pointerId !== event.pointerId || !modules.projects) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dx < -72 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+      setAppMode("projects");
+      if (preferences.haptics) vibrate(10);
+    }
+  };
+
   if (!hydrated || !authReady || (authUser && supabase && !cloudReady)) {
     return <div className="app-loading" aria-label="Загрузка"><span /></div>;
   }
@@ -727,12 +748,16 @@ export default function DiaryApp() {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
       {view === "home" && appMode === "notes" && modules.notes && (
-        <main className="screen home-screen">
+        <main
+          className="screen home-screen"
+          onPointerDown={startModuleSwipe}
+          onPointerUp={finishModuleSwipe}
+          onPointerCancel={() => { moduleSwipeRef.current = null; }}
+        >
           <header className="home-header">
             <div>
               <p className="eyebrow">{todayLabel()}</p>
               <h1>Дневник</h1>
-              <p className="header-note">Ваши мысли, планы и идеи</p>
             </div>
             <div className="header-actions">
               <button className="round-button" aria-label="Создать раздел" onClick={() => { setSheet("section"); setDraftName(""); }}>
@@ -1311,8 +1336,8 @@ function ContentHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="content-header">
-      <button className="content-back-button" onClick={onBack} aria-label="Назад">
+    <header className="content-header unified-content-header">
+      <button className="project-back" onClick={onBack} aria-label="Назад">
         <Icon name="back" size={25} />
       </button>
       <div className="content-header-title">{title}</div>
