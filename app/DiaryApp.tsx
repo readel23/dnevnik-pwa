@@ -1298,7 +1298,7 @@ function AuthPanel({
         password,
         options: {
           data: { username: normalizedUsername, full_name: fullName.trim() },
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: new URL("./", document.baseURI).href,
         },
       });
       setSubmitting(false);
