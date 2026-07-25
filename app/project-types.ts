@@ -46,6 +46,39 @@ export type ProjectItem = {
   completedAt?: string;
 };
 
+export type BoardTask = {
+  id: string;
+  title: string;
+  done: boolean;
+  description?: string;
+  createdAt: string;
+};
+
+export type BoardColumn = {
+  id: string;
+  title: string;
+  color: string;
+  tasks: BoardTask[];
+};
+
+export type ProjectNote = {
+  id: string;
+  title: string;
+  body: string;
+  color: "green" | "blue" | "purple" | "orange" | "pink" | "neutral";
+  createdAt: string;
+};
+
+export type ProjectDocument = {
+  id: string;
+  type: "folder" | "page";
+  parentId: string | null;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Project = {
   id: string;
   name: string;
@@ -60,6 +93,9 @@ export type Project = {
   archived: boolean;
   stages: ProjectStage[];
   items: ProjectItem[];
+  boardColumns?: BoardColumn[];
+  projectNotes?: ProjectNote[];
+  documents?: ProjectDocument[];
   createdAt: string;
   updatedAt: string;
 };
@@ -214,6 +250,26 @@ export function createProjectFromTemplate(
       createdAt: stamp,
       stageId: stages[0]?.id,
     })),
+    boardColumns: [
+      {
+        id: `${projectId}-board-todo`,
+        title: "Нужно сделать",
+        color: "blue",
+        tasks: template.starterItems
+          .filter((item) => item.type === "task")
+          .map((item, index) => ({
+            id: `${projectId}-board-task-${index}`,
+            title: item.title,
+            done: false,
+            description: item.body,
+            createdAt: stamp,
+          })),
+      },
+      { id: `${projectId}-board-doing`, title: "В работе", color: "orange", tasks: [] },
+      { id: `${projectId}-board-done`, title: "Готово", color: "green", tasks: [] },
+    ],
+    projectNotes: [],
+    documents: [],
     createdAt: stamp,
     updatedAt: stamp,
   };

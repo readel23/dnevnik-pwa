@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
+  closestCenter,
   DndContext,
   DragEndEvent,
   MouseSensor,
@@ -238,7 +239,7 @@ export default function DiaryApp() {
   const [modules, setModules] = useState<EnabledModules>(defaultModules);
   const [appMode, setAppMode] = useState<"notes" | "projects">("notes");
   const [cloudReady, setCloudReady] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncRevision, setSyncRevision] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
@@ -262,6 +263,7 @@ export default function DiaryApp() {
   const [draftTitleColor, setDraftTitleColor] = useState<TitleColor>("green");
   const [sheetSectionId, setSheetSectionId] = useState<string | null>(null);
   const [profilePanel, setProfilePanel] = useState<ProfilePanel | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(!supabase);
   const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
@@ -294,6 +296,25 @@ export default function DiaryApp() {
       navigator.serviceWorker.register(serviceWorkerUrl.pathname).catch(() => undefined);
     }
     /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const updateVisualViewport = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const top = viewport?.offsetTop ?? 0;
+      document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+      document.documentElement.style.setProperty("--visual-viewport-top", `${top}px`);
+    };
+    updateVisualViewport();
+    viewport?.addEventListener("resize", updateVisualViewport);
+    viewport?.addEventListener("scroll", updateVisualViewport);
+    window.addEventListener("resize", updateVisualViewport);
+    return () => {
+      viewport?.removeEventListener("resize", updateVisualViewport);
+      viewport?.removeEventListener("scroll", updateVisualViewport);
+      window.removeEventListener("resize", updateVisualViewport);
+    };
   }, []);
 
   useEffect(() => {
@@ -683,9 +704,13 @@ export default function DiaryApp() {
 
   const toggleModule = (key: keyof EnabledModules) => {
     const other: keyof EnabledModules = key === "notes" ? "projects" : "notes";
-    if (modules[key] && !modules[other]) return;
+    if (modules[key] && !modules[other]) {
+      setToast("Хотя бы один модуль должен оставаться включённым");
+      return;
+    }
     setModules((current) => ({ ...current, [key]: !current[key] }));
     if (modules[key] && appMode === key) setAppMode(other);
+    setToast(modules[key] ? "Модуль выключен" : "Модуль включён");
     if (preferences.haptics) vibrate(12);
   };
 
@@ -739,6 +764,8 @@ export default function DiaryApp() {
           ) : (
             <DndContext
               sensors={dragSensors}
+              collisionDetection={closestCenter}
+              autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }}
               onDragStart={beginDrag}
               onDragCancel={cancelDrag}
               onDragEnd={finishSectionDrag}
@@ -751,6 +778,19 @@ export default function DiaryApp() {
                         <>
                           <div className="section-heading">
                             <h2>{sectionItem.name}</h2>
+                            <button
+                              className={`section-collapse-button ${collapsedSections.has(sectionItem.id) ? "collapsed" : ""}`}
+                              aria-label={`${collapsedSections.has(sectionItem.id) ? "Развернуть" : "Свернуть"} раздел ${sectionItem.name}`}
+                              aria-expanded={!collapsedSections.has(sectionItem.id)}
+                              onClick={() => setCollapsedSections((current) => {
+                                const next = new Set(current);
+                                if (next.has(sectionItem.id)) next.delete(sectionItem.id);
+                                else next.add(sectionItem.id);
+                                return next;
+                              })}
+                            >
+                              <Icon name="chevron" size={19} />
+                            </button>
                             <button
                               className="section-drag-handle"
                               aria-label={`Переместить раздел ${sectionItem.name}`}
@@ -768,7 +808,8 @@ export default function DiaryApp() {
                               <Icon name="more" />
                             </button>
                           </div>
-                          <div className={`subsection-card ${sectionItem.subsections.length === 0 ? "empty-card" : ""}`}>
+                          <div className={`subsection-card section-collapsible ${collapsedSections.has(sectionItem.id) ? "collapsed" : ""} ${sectionItem.subsections.length === 0 ? "empty-card" : ""}`}>
+                            <div className="section-collapsible-inner">
                             {sectionItem.subsections.length === 0 ? (
                               <button className="empty-section" onClick={() => {
                                 setSheetSectionId(sectionItem.id);
@@ -798,6 +839,7 @@ export default function DiaryApp() {
                                 {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
                               </button>
                             ))}
+                            </div>
                           </div>
                         </>
                       )}
@@ -819,7 +861,6 @@ export default function DiaryApp() {
           onNotes={() => setAppMode("notes")}
           notesEnabled={modules.notes}
           haptics={preferences.haptics}
-          syncStatus={syncStatus}
         />
       )}
 
@@ -911,6 +952,8 @@ export default function DiaryApp() {
           ) : (
             <DndContext
               sensors={dragSensors}
+              collisionDetection={closestCenter}
+              autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }}
               onDragStart={beginDrag}
               onDragCancel={cancelDrag}
               onDragEnd={finishBlockDrag}
@@ -1114,23 +1157,21 @@ export default function DiaryApp() {
                       <span className="tile-icon green"><Icon name="pen" /></span>
                       <span><strong>Дневник заметок</strong><small>Разделы, записи, архив и свободные блоки</small></span>
                       <button
-                        className={`switch ${modules.notes ? "on" : ""}`}
+                        className="module-toggle-control"
                         role="switch"
                         aria-checked={modules.notes}
-                        disabled={modules.notes && !modules.projects}
                         onClick={() => toggleModule("notes")}
-                      ><span /></button>
+                      ><span className={`toggle ${modules.notes ? "on" : ""}`}><span /></span></button>
                     </div>
                     <div>
                       <span className="tile-icon purple"><Icon name="cube" /></span>
-                      <span><strong>Ведение проектов</strong><small>Задачи, этапы, доска, сроки и аналитика</small></span>
+                      <span><strong>Ведение проектов</strong><small>Доска задач, блочные заметки и документы</small></span>
                       <button
-                        className={`switch ${modules.projects ? "on" : ""}`}
+                        className="module-toggle-control"
                         role="switch"
                         aria-checked={modules.projects}
-                        disabled={modules.projects && !modules.notes}
                         onClick={() => toggleModule("projects")}
-                      ><span /></button>
+                      ><span className={`toggle ${modules.projects ? "on" : ""}`}><span /></span></button>
                     </div>
                   </div>
                   <p className="panel-copy">Хотя бы один модуль всегда должен оставаться включённым.</p>
@@ -1292,7 +1333,7 @@ function SortableSection({
 }) {
   const sortable = useSortable({ id });
   const style = {
-    transform: CSS.Transform.toString(sortable.transform),
+    transform: CSS.Translate.toString(sortable.transform),
     transition: sortable.transition,
   };
 
@@ -1352,9 +1393,15 @@ function DraggableSheet({
   };
 
   return (
-    <div className="modal-layer" role="presentation" onPointerDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
+    <div
+      className="modal-layer keyboard-aware-layer"
+      role="presentation"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <section
         className={`bottom-sheet ${expanded ? "expanded" : ""}`}
         style={{ transform: `translateY(${offset}px)` }}

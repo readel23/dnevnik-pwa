@@ -1,19 +1,38 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import {
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useRef,
+  useState,
+} from "react";
+import {
+  closestCorners,
+  DndContext,
+  DragEndEvent,
+  DragStartEvent,
+  MouseSensor,
+  TouchSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type {
+  BoardColumn,
+  BoardTask,
   Project,
-  ProjectItem,
-  ProjectItemType,
-  ProjectStatus,
-  TaskPriority,
-  TaskStatus,
+  ProjectDocument,
+  ProjectNote,
 } from "./project-types";
 import { createProjectFromTemplate, projectTemplates } from "./project-types";
-
-type ProjectScreen = "projects" | "today" | "search";
-type ProjectView = "overview" | "list" | "board" | "timeline" | "stats";
-type SyncStatus = "idle" | "saving" | "saved" | "offline" | "error";
 
 type Props = {
   projects: Project[];
@@ -22,171 +41,113 @@ type Props = {
   onNotes: () => void;
   notesEnabled: boolean;
   haptics: boolean;
-  syncStatus: SyncStatus;
 };
 
-const iconPaths = {
+type ProjectTab = "board" | "notes" | "documents";
+type ConfirmTarget =
+  | { kind: "project"; projectId: string; label: string }
+  | { kind: "column"; projectId: string; columnId: string; label: string }
+  | { kind: "task"; projectId: string; columnId: string; taskId: string; label: string }
+  | { kind: "note"; projectId: string; noteId: string; label: string }
+  | { kind: "document"; projectId: string; documentId: string; label: string };
+
+const paths = {
   plus: ["M12 5v14", "M5 12h14"],
   user: ["M20 21a8 8 0 0 0-16 0", "M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"],
   back: ["m15 18-6-6 6-6"],
   chevron: ["m9 18 6-6-6-6"],
+  down: ["m6 9 6 6 6-6"],
+  more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
   search: ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"],
   folder: ["M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"],
+  folderPlus: ["M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z", "M12 10v6", "M9 13h6"],
+  page: ["M5 3h10l4 4v14H5Z", "M15 3v5h5", "M8 13h8", "M8 17h6"],
+  board: ["M4 4h6v16H4Z", "M14 4h6v9h-6Z"],
+  note: ["M5 3h10l4 4v14H5Z", "M15 3v5h5", "M8 13h8"],
+  check: ["m5 12 4 4L19 6"],
+  grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
+  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 14h10l1-14"],
+  edit: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z", "m14.5 7.5 3 3"],
+  star: ["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"],
   code: ["m8 9-4 3 4 3", "m16 9 4 3-4 3", "m14 5-4 14"],
   book: ["M4 5a3 3 0 0 1 3-3h13v17H7a3 3 0 0 0-3 3Z", "M4 5v17", "M8 7h8"],
   plane: ["M22 2 9 15l-6 1 4 2 2 4 1-6Z", "M9 15 13 2"],
   home: ["m3 11 9-8 9 8", "M5 10v11h14V10", "M9 21v-7h6v7"],
   wallet: ["M3 6a3 3 0 0 1 3-3h12v18H6a3 3 0 0 1-3-3Z", "M3 7h15", "M15 12h6v5h-6a2.5 2.5 0 0 1 0-5Z"],
-  rocket: ["M14 4c4-3 7-2 7-2s1 3-2 7l-7 7-5-5Z", "m9 14-5 1 1-5", "m14 9 5 5-1 5", "M5 19c-2 0-3 2-3 3 1 0 3-1 3-3Z"],
-  spark: ["m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z", "m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z"],
-  star: ["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"],
-  check: ["m5 12 4 4L19 6"],
-  calendar: ["M6 2v4", "M18 2v4", "M3 9h18", "M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"],
+  rocket: ["M14 4c4-3 7-2 7-2s1 3-2 7l-7 7-5-5Z", "m9 14-5 1 1-5", "m14 9 5 5-1 5"],
+  spark: ["m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"],
+  heading: ["M5 5v14", "M19 5v14", "M5 12h14"],
   list: ["M9 6h11", "M9 12h11", "M9 18h11", "M4 6h.01", "M4 12h.01", "M4 18h.01"],
-  board: ["M4 4h6v16H4Z", "M14 4h6v9h-6Z"],
-  chart: ["M4 20V10", "M10 20V4", "M16 20v-7", "M22 20H2"],
-  more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
-  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 14h10l1-14"],
-  archive: ["M4 7h16", "M5 7v13h14V7", "M3 3h18v4H3Z", "M10 12h4"],
-  flag: ["M5 21V4", "M5 5h12l-2 4 2 4H5"],
-  bulb: ["M9 18h6", "M10 22h4", "M8.5 14.5a7 7 0 1 1 7 0c-1 .8-1.5 1.8-1.5 3.5h-4c0-1.7-.5-2.7-1.5-3.5Z"],
-  note: ["M5 3h10l4 4v14H5Z", "M15 3v5h5", "M8 13h8", "M8 17h6"],
-  warning: ["M12 3 2 21h20Z", "M12 9v4", "M12 17h.01"],
-  link: ["M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1", "M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"],
-  target: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z", "M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"],
-  clock: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
+  quote: ["M6 17h4l2-5V7H5v6h4", "M15 17h4l2-5V7h-7v6h4"],
 } as const;
 
-type ProjectIconName = keyof typeof iconPaths;
+type IconName = keyof typeof paths;
 
-function PIcon({ name, size = 22 }: { name: ProjectIconName; size?: number }) {
+function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      {iconPaths[name].map((path, index) => <path d={path} key={index} />)}
+      {paths[name].map((path, index) => <path d={path} key={index} />)}
     </svg>
   );
 }
 
-const statusLabels: Record<TaskStatus, string> = {
-  backlog: "План",
-  todo: "Сделать",
-  doing: "В работе",
-  done: "Готово",
-};
-
-const projectStatusLabels: Record<ProjectStatus, string> = {
-  planned: "Запланирован",
-  active: "Активный",
-  paused: "На паузе",
-  done: "Завершён",
-};
-
-const priorityLabels: Record<TaskPriority, string> = {
-  low: "Низкий",
-  medium: "Средний",
-  high: "Высокий",
-};
-
-const typeLabels: Record<ProjectItemType, string> = {
-  task: "Задача",
-  note: "Заметка",
-  idea: "Идея",
-  decision: "Решение",
-  problem: "Проблема",
-  risk: "Риск",
-  milestone: "Этап",
-  link: "Ссылка",
-};
-
-const typeIcons: Record<ProjectItemType, ProjectIconName> = {
-  task: "check",
-  note: "note",
-  idea: "bulb",
-  decision: "target",
-  problem: "warning",
-  risk: "flag",
-  milestone: "star",
-  link: "link",
-};
-
-function localDate(value?: string) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(new Date(`${value}T12:00:00`));
+function uid(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function dateKey(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+function pulse(enabled: boolean, pattern: number | number[] = 12) {
+  if (enabled && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
 }
 
-function pulse(haptics: boolean, pattern: number | number[] = 12) {
-  if (haptics && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+function defaultColumns(project: Project): BoardColumn[] {
+  if (project.boardColumns?.length) return project.boardColumns;
+  const stamp = new Date().toISOString();
+  return [
+    {
+      id: `${project.id}-todo`,
+      title: "Нужно сделать",
+      color: "blue",
+      tasks: project.items
+        .filter((item) => item.type === "task" && item.status !== "done")
+        .map((item) => ({ id: `${project.id}-legacy-${item.id}`, title: item.title, description: item.body, done: false, createdAt: stamp })),
+    },
+    { id: `${project.id}-doing`, title: "В работе", color: "orange", tasks: [] },
+    {
+      id: `${project.id}-done`,
+      title: "Готово",
+      color: "green",
+      tasks: project.items
+        .filter((item) => item.type === "task" && item.status === "done")
+        .map((item) => ({ id: `${project.id}-legacy-${item.id}`, title: item.title, description: item.body, done: true, createdAt: stamp })),
+    },
+  ];
 }
 
-function freshItem(type: ProjectItemType): ProjectItem {
-  return {
-    id: `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    type,
-    title: "",
-    body: "",
-    status: type === "note" || type === "idea" ? "backlog" : "todo",
-    priority: "medium",
-    tags: [],
-    checklist: [],
-    createdAt: new Date().toISOString(),
-  };
-}
-
-export default function ProjectModule({ projects, onChange, onProfile, onNotes, notesEnabled, haptics, syncStatus }: Props) {
-  const [screen, setScreen] = useState<ProjectScreen>("projects");
+export default function ProjectModule({
+  projects,
+  onChange,
+  onProfile,
+  onNotes,
+  notesEnabled,
+  haptics,
+}: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [projectView, setProjectView] = useState<ProjectView>("overview");
+  const [tab, setTab] = useState<ProjectTab>("board");
   const [query, setQuery] = useState("");
-  const [projectFilter, setProjectFilter] = useState<"active" | "favorite" | "archived">("active");
-  const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus>("all");
-  const [templateOpen, setTemplateOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState(projectTemplates[0]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [templateId, setTemplateId] = useState("blank");
   const [projectName, setProjectName] = useState("");
-  const [projectGoal, setProjectGoal] = useState("");
-  const [projectDue, setProjectDue] = useState("");
-  const [itemDraft, setItemDraft] = useState<ProjectItem | null>(null);
-  const [projectEdit, setProjectEdit] = useState<{
-    name: string;
-    goal: string;
-    description: string;
-    status: ProjectStatus;
-    dueDate: string;
-    stages: string;
-  } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ kind: "project" | "item"; id: string; label: string } | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
+  const [renameProject, setRenameProject] = useState<{ id: string; name: string } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmTarget | null>(null);
+  const [noteDraft, setNoteDraft] = useState<ProjectNote | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
 
   const activeProject = projects.find((project) => project.id === activeId);
-  const visibleProjects = useMemo(() => projects
-    .filter((project) => projectFilter === "archived" ? project.archived : !project.archived)
-    .filter((project) => projectFilter !== "favorite" || project.favorite)
-    .filter((project) => {
-      const normalized = query.trim().toLowerCase();
-      return !normalized || `${project.name} ${project.description} ${project.goal}`.toLowerCase().includes(normalized);
-    })
-    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt)), [projectFilter, projects, query]);
-
-  const allTasks = useMemo(() => projects.flatMap((project) =>
-    project.items
-      .filter((item) => !item.archived && item.type === "task")
-      .map((item) => ({ item, project })),
-  ), [projects]);
-
-  const todayTasks = allTasks
-    .filter(({ item }) => item.status !== "done" && item.dueDate && item.dueDate <= dateKey())
-    .sort((a, b) => (a.item.dueDate || "").localeCompare(b.item.dueDate || ""));
-
-  const searchResults = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return [];
-    return projects.flatMap((project) => project.items
-      .filter((item) => !item.archived && `${item.title} ${item.body} ${item.tags.join(" ")}`.toLowerCase().includes(normalized))
-      .map((item) => ({ item, project })));
-  }, [projects, query]);
+  const shownProjects = projects
+    .filter((project) => !query.trim() || `${project.name} ${project.description}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt));
 
   const updateProject = (id: string, updater: (project: Project) => Project) => {
     onChange(projects.map((project) => project.id === id
@@ -194,599 +155,758 @@ export default function ProjectModule({ projects, onChange, onProfile, onNotes, 
       : project));
   };
 
-  const setItemStatus = (projectId: string, itemId: string, status: TaskStatus) => {
-    updateProject(projectId, (project) => ({
-      ...project,
-      items: project.items.map((item) => item.id === itemId
-        ? { ...item, status, completedAt: status === "done" ? new Date().toISOString() : undefined }
-        : item),
-    }));
-    pulse(haptics, status === "done" ? [12, 35, 18] : 10);
+  const startProjectLongPress = (event: ReactPointerEvent, projectId: string) => {
+    longPressed.current = false;
+    const x = event.clientX;
+    const y = event.clientY;
+    longPressTimer.current = setTimeout(() => {
+      longPressed.current = true;
+      const menuWidth = Math.min(260, window.innerWidth - 32);
+      setProjectMenu({
+        projectId,
+        x: Math.max(16, Math.min(x - menuWidth / 2, window.innerWidth - menuWidth - 16)),
+        y: Math.max(16, Math.min(y + 14, window.innerHeight - 172)),
+      });
+      document.getSelection()?.removeAllRanges();
+      pulse(haptics, 22);
+    }, 340);
   };
 
-  const saveProject = (event: FormEvent) => {
+  const stopProjectLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  };
+
+  const openProject = (projectId: string) => {
+    if (longPressed.current) return;
+    setActiveId(projectId);
+    setTab("board");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const createProject = (event: FormEvent) => {
     event.preventDefault();
-    const next = createProjectFromTemplate(selectedTemplate, projectName, projectGoal, projectDue);
-    onChange([next, ...projects]);
-    setTemplateOpen(false);
+    if (!projectName.trim()) return;
+    const template = projectTemplates.find((item) => item.id === templateId) || projectTemplates[0];
+    const project = createProjectFromTemplate(template, projectName, "", undefined);
+    onChange([project, ...projects]);
     setProjectName("");
-    setProjectGoal("");
-    setProjectDue("");
-    setSelectedTemplate(projectTemplates[0]);
-    setActiveId(next.id);
-    setProjectView("overview");
-    pulse(haptics, [12, 30, 12]);
-  };
-
-  const saveItem = (event: FormEvent) => {
-    event.preventDefault();
-    if (!activeProject || !itemDraft || !itemDraft.title.trim()) return;
-    updateProject(activeProject.id, (project) => ({
-      ...project,
-      items: project.items.some((item) => item.id === itemDraft.id)
-        ? project.items.map((item) => item.id === itemDraft.id ? { ...itemDraft, title: itemDraft.title.trim(), body: itemDraft.body.trim() } : item)
-        : [{ ...itemDraft, title: itemDraft.title.trim(), body: itemDraft.body.trim(), stageId: itemDraft.stageId || project.stages[0]?.id }, ...project.items],
-    }));
-    setItemDraft(null);
-    pulse(haptics);
-  };
-
-  const saveProjectEdit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!activeProject || !projectEdit?.name.trim()) return;
-    const stageNames = projectEdit.stages.split("\n").map((value) => value.trim()).filter(Boolean);
-    updateProject(activeProject.id, (project) => ({
-      ...project,
-      name: projectEdit.name.trim(),
-      goal: projectEdit.goal.trim(),
-      description: projectEdit.description.trim(),
-      status: projectEdit.status,
-      dueDate: projectEdit.dueDate || undefined,
-      stages: stageNames.map((name, index) => project.stages[index]
-        ? { ...project.stages[index], name }
-        : { id: `${project.id}-stage-${Date.now()}-${index}`, name, color: ["blue", "purple", "green", "orange", "pink"][index % 5], done: false }),
-    }));
-    setProjectEdit(null);
-    pulse(haptics);
+    setTemplateId("blank");
+    setCreateOpen(false);
+    setActiveId(project.id);
+    setTab("board");
+    pulse(haptics, [12, 28, 12]);
   };
 
   const executeDelete = () => {
-    if (!confirmDelete) return;
-    if (confirmDelete.kind === "project") {
-      onChange(projects.filter((project) => project.id !== confirmDelete.id));
-      setActiveId(null);
-    } else if (activeProject) {
-      updateProject(activeProject.id, (project) => ({
+    if (!confirm) return;
+    if (confirm.kind === "project") {
+      onChange(projects.filter((project) => project.id !== confirm.projectId));
+      if (activeId === confirm.projectId) setActiveId(null);
+    } else if (confirm.kind === "column") {
+      updateProject(confirm.projectId, (project) => ({
         ...project,
-        items: project.items.filter((item) => item.id !== confirmDelete.id),
+        boardColumns: defaultColumns(project).filter((column) => column.id !== confirm.columnId),
       }));
+    } else if (confirm.kind === "task") {
+      updateProject(confirm.projectId, (project) => ({
+        ...project,
+        boardColumns: defaultColumns(project).map((column) => column.id === confirm.columnId
+          ? { ...column, tasks: column.tasks.filter((task) => task.id !== confirm.taskId) }
+          : column),
+      }));
+    } else if (confirm.kind === "note") {
+      updateProject(confirm.projectId, (project) => ({
+        ...project,
+        projectNotes: (project.projectNotes || []).filter((note) => note.id !== confirm.noteId),
+      }));
+    } else {
+      updateProject(confirm.projectId, (project) => {
+        const documents = project.documents || [];
+        const removing = new Set([confirm.documentId]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const node of documents) {
+            if (node.parentId && removing.has(node.parentId) && !removing.has(node.id)) {
+              removing.add(node.id);
+              changed = true;
+            }
+          }
+        }
+        return { ...project, documents: documents.filter((node) => !removing.has(node.id)) };
+      });
     }
-    setConfirmDelete(null);
+    setConfirm(null);
     pulse(haptics, 24);
   };
 
   if (activeProject) {
     return (
-      <main className="screen project-detail-screen">
-        <header className="project-detail-header">
-          <button className="project-back" aria-label="Назад к проектам" onClick={() => { setActiveId(null); setMenuOpen(false); }}>
-            <PIcon name="back" />
-          </button>
-          <div className={`project-symbol ${activeProject.accent}`}><PIcon name={activeProject.icon} size={24} /></div>
-          <div className="project-title-copy">
-            <span>{projectStatusLabels[activeProject.status]}</span>
-            <h1>{activeProject.name}</h1>
-          </div>
-          <button className="project-more" aria-label="Настройки проекта" aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>
-            <PIcon name="more" />
-          </button>
-          {menuOpen && (
-            <div className="project-menu">
-              <button onClick={() => {
-                setProjectEdit({
-                  name: activeProject.name,
-                  goal: activeProject.goal,
-                  description: activeProject.description,
-                  status: activeProject.status,
-                  dueDate: activeProject.dueDate || "",
-                  stages: activeProject.stages.map((stage) => stage.name).join("\n"),
-                });
-                setMenuOpen(false);
-              }}><PIcon name="note" size={19} />Редактировать</button>
-              <button onClick={() => {
-                updateProject(activeProject.id, (project) => ({ ...project, favorite: !project.favorite }));
-                setMenuOpen(false);
-              }}><PIcon name="star" size={19} />{activeProject.favorite ? "Убрать из избранного" : "В избранное"}</button>
-              <button onClick={() => {
-                updateProject(activeProject.id, (project) => ({ ...project, archived: !project.archived }));
-                setActiveId(null);
-              }}><PIcon name="archive" size={19} />{activeProject.archived ? "Вернуть из архива" : "В архив"}</button>
-              <button className="danger" onClick={() => {
-                setConfirmDelete({ kind: "project", id: activeProject.id, label: activeProject.name });
-                setMenuOpen(false);
-              }}><PIcon name="trash" size={19} />Удалить</button>
-            </div>
-          )}
+      <main className="screen project-detail-screen project-workspace" onPointerDown={(event) => {
+        if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu, .project-more")) setProjectMenu(null);
+      }}>
+        <header className="project-detail-header simple">
+          <button className="project-back" aria-label="Назад к проектам" onClick={() => setActiveId(null)}><Icon name="back" /></button>
+          <span className={`project-symbol ${activeProject.accent}`}><Icon name={activeProject.icon} size={23} /></span>
+          <div className="project-title-copy"><span>Проект</span><h1>{activeProject.name}</h1></div>
+          <button className="project-more" aria-label="Меню проекта" onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setProjectMenu({
+              projectId: activeProject.id,
+              x: Math.max(16, rect.right - 260),
+              y: Math.min(rect.bottom + 6, window.innerHeight - 172),
+            });
+          }}><Icon name="more" /></button>
         </header>
 
-        <nav className="project-view-tabs" aria-label="Представление проекта">
-          {([
-            ["overview", "Обзор", "target"],
-            ["list", "Список", "list"],
-            ["board", "Доска", "board"],
-            ["timeline", "Сроки", "calendar"],
-            ["stats", "Итоги", "chart"],
-          ] as Array<[ProjectView, string, ProjectIconName]>).map(([value, label, icon]) => (
-            <button key={value} className={projectView === value ? "active" : ""} aria-current={projectView === value ? "page" : undefined} onClick={() => setProjectView(value)}>
-              <PIcon name={icon} size={19} /><span>{label}</span>
-            </button>
-          ))}
+        <nav className="workspace-tabs" aria-label="Разделы проекта">
+          <button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}><Icon name="board" size={19} />Доска</button>
+          <button className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}><Icon name="note" size={19} />Заметки</button>
+          <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}><Icon name="page" size={19} />Документы</button>
         </nav>
 
-        <ProjectViewContent
-          project={activeProject}
-          view={projectView}
-          filter={taskFilter}
-          setFilter={setTaskFilter}
-          onEdit={setItemDraft}
-          onStatus={(itemId, status) => setItemStatus(activeProject.id, itemId, status)}
-        />
-
-        <button className="project-fab" aria-label="Добавить в проект" onClick={() => setItemDraft(freshItem("task"))}>
-          <PIcon name="plus" size={27} />
-        </button>
-
-        {itemDraft && (
-          <ItemSheet
-            draft={itemDraft}
-            project={activeProject}
-            onChange={setItemDraft}
-            onClose={() => setItemDraft(null)}
-            onSave={saveItem}
-            onDelete={activeProject.items.some((item) => item.id === itemDraft.id)
-              ? () => {
-                  setConfirmDelete({ kind: "item", id: itemDraft.id, label: itemDraft.title });
-                  setItemDraft(null);
-                }
-              : undefined}
+        {tab === "board" && (
+          <ProjectBoard
+            columns={defaultColumns(activeProject)}
+            onChange={(boardColumns) => updateProject(activeProject.id, (project) => ({ ...project, boardColumns }))}
+            onConfirmDelete={(column) => setConfirm({ kind: "column", projectId: activeProject.id, columnId: column.id, label: column.title })}
+            onConfirmDeleteTask={(columnId, task) => setConfirm({ kind: "task", projectId: activeProject.id, columnId, taskId: task.id, label: task.title })}
+            haptics={haptics}
           />
         )}
 
-        {projectEdit && (
-          <div className="project-sheet-layer" role="presentation">
-            <form className="project-sheet item-editor-sheet" onSubmit={saveProjectEdit}>
-              <div className="sheet-grabber" />
-              <div className="project-sheet-header">
-                <button type="button" onClick={() => setProjectEdit(null)}>Отмена</button>
-                <strong>Настройки проекта</strong>
-                <button type="submit" disabled={!projectEdit.name.trim()}>Готово</button>
-              </div>
-              <div className="project-sheet-scroll">
-                <label className="project-field"><span>Название</span><input autoFocus value={projectEdit.name} onChange={(event) => setProjectEdit({ ...projectEdit, name: event.target.value })} /></label>
-                <label className="project-field"><span>Цель</span><textarea value={projectEdit.goal} onChange={(event) => setProjectEdit({ ...projectEdit, goal: event.target.value })} placeholder="Какой результат должен получиться?" /></label>
-                <label className="project-field"><span>Описание</span><textarea value={projectEdit.description} onChange={(event) => setProjectEdit({ ...projectEdit, description: event.target.value })} /></label>
-                <div className="project-field-grid">
-                  <label className="project-field"><span>Статус</span><select value={projectEdit.status} onChange={(event) => setProjectEdit({ ...projectEdit, status: event.target.value as ProjectStatus })}>{Object.entries(projectStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                  <label className="project-field"><span>Срок</span><input type="date" value={projectEdit.dueDate} onChange={(event) => setProjectEdit({ ...projectEdit, dueDate: event.target.value })} /></label>
-                </div>
-                <label className="project-field"><span>Этапы · по одному на строку</span><textarea value={projectEdit.stages} onChange={(event) => setProjectEdit({ ...projectEdit, stages: event.target.value })} /></label>
-              </div>
-            </form>
-          </div>
+        {tab === "notes" && (
+          <ProjectNotes
+            notes={activeProject.projectNotes || []}
+            onChange={(projectNotes) => updateProject(activeProject.id, (project) => ({ ...project, projectNotes }))}
+            onEdit={setNoteDraft}
+            onDelete={(note) => setConfirm({ kind: "note", projectId: activeProject.id, noteId: note.id, label: note.title || "заметку" })}
+            onCreate={() => setNoteDraft({ id: uid("note"), title: "", body: "", color: "green", createdAt: new Date().toISOString() })}
+            haptics={haptics}
+          />
         )}
 
-        {confirmDelete && <ConfirmDialog label={confirmDelete.label} onCancel={() => setConfirmDelete(null)} onConfirm={executeDelete} />}
+        {tab === "documents" && (
+          <DocumentWorkspace
+            documents={activeProject.documents || []}
+            onChange={(documents) => updateProject(activeProject.id, (project) => ({ ...project, documents }))}
+            onConfirmDelete={(document) => setConfirm({ kind: "document", projectId: activeProject.id, documentId: document.id, label: document.title || "Без названия" })}
+            haptics={haptics}
+          />
+        )}
+
+        {noteDraft && (
+          <Sheet onClose={() => setNoteDraft(null)}>
+            <form className="project-note-editor" onSubmit={(event) => {
+              event.preventDefault();
+              if (!noteDraft.title.trim() && !noteDraft.body.trim()) return;
+              const notes = activeProject.projectNotes || [];
+              const next = notes.some((note) => note.id === noteDraft.id)
+                ? notes.map((note) => note.id === noteDraft.id ? noteDraft : note)
+                : [noteDraft, ...notes];
+              updateProject(activeProject.id, (project) => ({ ...project, projectNotes: next }));
+              setNoteDraft(null);
+            }}>
+              <div className="project-sheet-header">
+                <button type="button" onClick={() => setNoteDraft(null)}>Отмена</button>
+                <strong>Заметка</strong>
+                <button type="submit">Готово</button>
+              </div>
+              <div className="project-note-fields">
+                <input autoFocus aria-label="Заголовок заметки" value={noteDraft.title} onChange={(event) => setNoteDraft({ ...noteDraft, title: event.target.value })} placeholder="Название заметки" />
+                {noteDraft.title.trim() && <div className="project-note-colors">{(["green", "blue", "purple", "orange", "pink", "neutral"] as const).map((color) => <button type="button" key={color} className={`${color} ${noteDraft.color === color ? "selected" : ""}`} aria-label={`Цвет ${color}`} onClick={() => setNoteDraft({ ...noteDraft, color })} />)}</div>}
+                <textarea aria-label="Текст заметки" value={noteDraft.body} onChange={(event) => setNoteDraft({ ...noteDraft, body: event.target.value })} placeholder="Начните писать…" />
+              </div>
+            </form>
+          </Sheet>
+        )}
+
+        {projectMenu && <ProjectContextMenu
+          project={activeProject}
+          position={projectMenu}
+          onRename={() => { setRenameProject({ id: activeProject.id, name: activeProject.name }); setProjectMenu(null); }}
+          onFavorite={() => { updateProject(activeProject.id, (item) => ({ ...item, favorite: !item.favorite })); setProjectMenu(null); }}
+          onDelete={() => { setConfirm({ kind: "project", projectId: activeProject.id, label: activeProject.name }); setProjectMenu(null); }}
+        />}
+        {renameProject && <RenameProjectSheet value={renameProject} onChange={setRenameProject} onClose={() => setRenameProject(null)} onSave={() => {
+          if (!renameProject.name.trim()) return;
+          updateProject(renameProject.id, (project) => ({ ...project, name: renameProject.name.trim() }));
+          setRenameProject(null);
+        }} />}
+        {confirm && <ConfirmDialog label={confirm.label} onCancel={() => setConfirm(null)} onConfirm={executeDelete} />}
       </main>
     );
   }
 
   return (
-    <main className="screen projects-screen">
+    <main className="screen projects-screen clean-projects-screen" onPointerDown={(event) => {
+      if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu")) setProjectMenu(null);
+    }}>
       <header className="projects-header">
-        <div>
-          <p className="eyebrow">Личное пространство</p>
-          <h1>{screen === "today" ? "Сегодня" : screen === "search" ? "Поиск" : "Проекты"}</h1>
-          <p className="projects-subtitle">
-            {screen === "today" ? "Главные задачи на текущий день" : screen === "search" ? "Найдите задачу, решение или заметку" : "От идеи до результата — в одном месте"}
-          </p>
-        </div>
+        <div><p className="eyebrow">Рабочее пространство</p><h1>Проекты</h1><p className="projects-subtitle">Доски, заметки и документы без лишнего.</p></div>
         <div className="header-actions">
-          {screen === "projects" && <button className="round-button" aria-label="Создать проект" onClick={() => setTemplateOpen(true)}><PIcon name="plus" size={27} /></button>}
-          <button className="round-button" aria-label="Открыть профиль" onClick={onProfile}><PIcon name="user" size={26} /></button>
+          <button className="round-button" aria-label="Создать проект" onClick={() => setCreateOpen(true)}><Icon name="plus" size={27} /></button>
+          <button className="round-button" aria-label="Открыть профиль" onClick={onProfile}><Icon name="user" size={26} /></button>
         </div>
       </header>
 
       {notesEnabled && (
         <div className="module-switcher" role="tablist" aria-label="Модули приложения">
-          <button role="tab" aria-selected="false" onClick={onNotes}><PIcon name="note" size={18} />Заметки</button>
-          <button className="active" role="tab" aria-selected="true"><PIcon name="folder" size={18} />Проекты</button>
+          <button role="tab" aria-selected="false" onClick={onNotes}><Icon name="note" size={18} />Заметки</button>
+          <button className="active" role="tab" aria-selected="true"><Icon name="folder" size={18} />Проекты</button>
         </div>
       )}
 
-      <div className={`cloud-status ${syncStatus}`}>
-        <span />
-        {syncStatus === "saving" ? "Сохраняем изменения…" : syncStatus === "offline" ? "Офлайн · синхронизируем позже" : syncStatus === "error" ? "Не удалось синхронизировать" : "Все данные синхронизированы"}
-      </div>
+      <div className="project-search"><Icon name="search" size={20} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти проект" aria-label="Найти проект" /></div>
 
-      {screen === "projects" && (
-        <>
-          <div className="project-search">
-            <PIcon name="search" size={20} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти проект" aria-label="Найти проект" />
-          </div>
-          <div className="filter-chips" role="group" aria-label="Фильтр проектов">
-            <button className={projectFilter === "active" ? "active" : ""} onClick={() => setProjectFilter("active")}>Активные</button>
-            <button className={projectFilter === "favorite" ? "active" : ""} onClick={() => setProjectFilter("favorite")}>Избранные</button>
-            <button className={projectFilter === "archived" ? "active" : ""} onClick={() => setProjectFilter("archived")}>Архив</button>
-          </div>
-          {visibleProjects.length ? (
-            <div className="projects-grid">
-              {visibleProjects.map((project) => <ProjectCard project={project} key={project.id} onOpen={() => { setActiveId(project.id); setProjectView("overview"); }} />)}
-            </div>
-          ) : (
-            <ProjectEmpty archived={projectFilter === "archived"} onCreate={() => setTemplateOpen(true)} />
-          )}
-        </>
+      {shownProjects.length ? (
+        <div className="projects-grid clean-project-grid">
+          {shownProjects.map((project) => {
+            const columns = defaultColumns(project);
+            const tasks = columns.flatMap((column) => column.tasks);
+            const done = tasks.filter((task) => task.done).length;
+            return (
+              <article className="project-card clean-project-card" key={project.id}>
+                <button
+                  className="project-card-open"
+                  onContextMenu={(event) => event.preventDefault()}
+                  onPointerDown={(event) => startProjectLongPress(event, project.id)}
+                  onPointerUp={() => { stopProjectLongPress(); openProject(project.id); }}
+                  onPointerCancel={stopProjectLongPress}
+                  onPointerLeave={stopProjectLongPress}
+                >
+                  <span className={`project-symbol ${project.accent}`}><Icon name={project.icon} size={23} /></span>
+                  <span><strong>{project.name}</strong><small>{columns.length} групп · {done}/{tasks.length} выполнено</small></span>
+                  {project.favorite && <Icon name="star" size={17} />}
+                  <Icon name="chevron" size={20} />
+                </button>
+                <button className="project-card-menu-button" aria-label={`Меню проекта ${project.name}`} onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setProjectMenu({ projectId: project.id, x: Math.max(16, rect.right - 260), y: Math.min(rect.bottom + 4, window.innerHeight - 172) });
+                }}><Icon name="more" size={20} /></button>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="project-empty">
+          <span className="project-empty-icon"><Icon name="board" size={31} /></span>
+          <h2>{query ? "Проекты не найдены" : "Создайте первый проект"}</h2>
+          <p>{query ? "Попробуйте изменить запрос." : "Внутри будут чистая доска, заметки и пространство для документов."}</p>
+          {!query && <button onClick={() => setCreateOpen(true)}><Icon name="plus" size={19} />Создать проект</button>}
+        </div>
       )}
 
-      {screen === "today" && (
-        <section className="today-projects">
-          <div className="today-summary">
-            <span><strong>{todayTasks.length}</strong> требуют внимания</span>
-            <span><strong>{allTasks.filter(({ item }) => item.status === "done" && item.completedAt?.slice(0, 10) === dateKey()).length}</strong> завершено сегодня</span>
-          </div>
-          {todayTasks.length ? todayTasks.map(({ item, project }) => (
-            <TaskRow key={item.id} item={item} project={project} onOpen={() => { setActiveId(project.id); setItemDraft(item); }} onStatus={(status) => setItemStatus(project.id, item.id, status)} />
-          )) : (
-            <div className="project-empty compact">
-              <span className="project-empty-icon"><PIcon name="check" size={30} /></span>
-              <h2>На сегодня всё спокойно</h2>
-              <p>Задачи с истёкшим или сегодняшним сроком появятся здесь.</p>
-            </div>
-          )}
-        </section>
-      )}
-
-      {screen === "search" && (
-        <section>
-          <div className="project-search large">
-            <PIcon name="search" size={21} />
-            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Задачи, заметки, теги…" aria-label="Поиск по проектам" />
-          </div>
-          {query.trim() && (
-            <p className="search-count">{searchResults.length ? `Найдено: ${searchResults.length}` : "Ничего не найдено"}</p>
-          )}
-          <div className="search-results">
-            {searchResults.map(({ item, project }) => (
-              <button key={item.id} className="search-result" onClick={() => { setActiveId(project.id); setItemDraft(item); }}>
-                <span className={`type-icon ${item.type}`}><PIcon name={typeIcons[item.type]} size={19} /></span>
-                <span><strong>{item.title}</strong><small>{project.name} · {typeLabels[item.type]}</small></span>
-                <PIcon name="chevron" size={19} />
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <nav className="project-local-nav" aria-label="Разделы проектов">
-        <button className={screen === "projects" ? "active" : ""} onClick={() => setScreen("projects")}><PIcon name="folder" size={21} /><span>Проекты</span></button>
-        <button className={screen === "today" ? "active" : ""} onClick={() => setScreen("today")}><PIcon name="calendar" size={21} /><span>Сегодня</span>{todayTasks.length > 0 && <b>{todayTasks.length}</b>}</button>
-        <button className={screen === "search" ? "active" : ""} onClick={() => setScreen("search")}><PIcon name="search" size={21} /><span>Поиск</span></button>
-      </nav>
-
-      {templateOpen && (
-        <div className="project-sheet-layer" role="presentation" onPointerDown={(event) => {
-          if (event.target === event.currentTarget) setTemplateOpen(false);
-        }}>
-          <form className="project-sheet" onSubmit={saveProject}>
-            <div className="sheet-grabber" />
-            <div className="project-sheet-header">
-              <button type="button" onClick={() => setTemplateOpen(false)}>Отмена</button>
-              <strong>Новый проект</strong>
-              <button type="submit" disabled={!projectName.trim()}>Создать</button>
-            </div>
+      {createOpen && (
+        <Sheet onClose={() => setCreateOpen(false)}>
+          <form onSubmit={createProject}>
+            <div className="project-sheet-header"><button type="button" onClick={() => setCreateOpen(false)}>Отмена</button><strong>Новый проект</strong><button type="submit" disabled={!projectName.trim()}>Создать</button></div>
             <div className="project-sheet-scroll">
-              <label className="project-field"><span>Название</span><input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Например, новое приложение" /></label>
-              <label className="project-field"><span>Главная цель</span><textarea value={projectGoal} onChange={(event) => setProjectGoal(event.target.value)} placeholder="Какой результат должен получиться?" /></label>
-              <label className="project-field"><span>Желаемый срок</span><input type="date" value={projectDue} onChange={(event) => setProjectDue(event.target.value)} /></label>
-              <fieldset className="template-picker">
-                <legend>Шаблон</legend>
-                <div>
-                  {projectTemplates.map((template) => (
-                    <button type="button" key={template.id} className={selectedTemplate.id === template.id ? "selected" : ""} onClick={() => setSelectedTemplate(template)}>
-                      <span className={`project-symbol ${template.accent}`}><PIcon name={template.icon} size={21} /></span>
-                      <span><strong>{template.name}</strong><small>{template.description}</small></span>
-                      {selectedTemplate.id === template.id && <PIcon name="check" size={19} />}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
+              <label className="project-field"><span>Название</span><input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Например, запуск приложения" /></label>
+              <fieldset className="template-picker"><legend>Шаблон</legend><div>{projectTemplates.map((template) => <button type="button" key={template.id} className={templateId === template.id ? "selected" : ""} onClick={() => setTemplateId(template.id)}><span className={`project-symbol ${template.accent}`}><Icon name={template.icon} size={21} /></span><span><strong>{template.name}</strong><small>{template.description}</small></span>{templateId === template.id && <Icon name="check" size={18} />}</button>)}</div></fieldset>
             </div>
           </form>
-        </div>
+        </Sheet>
       )}
+
+      {renameProject && <RenameProjectSheet value={renameProject} onChange={setRenameProject} onClose={() => setRenameProject(null)} onSave={() => {
+        if (!renameProject.name.trim()) return;
+        updateProject(renameProject.id, (project) => ({ ...project, name: renameProject.name.trim() }));
+        setRenameProject(null);
+      }} />}
+
+      {projectMenu && (() => {
+        const project = projects.find((item) => item.id === projectMenu.projectId);
+        if (!project) return null;
+        return <ProjectContextMenu
+          project={project}
+          position={projectMenu}
+          onRename={() => { setRenameProject({ id: project.id, name: project.name }); setProjectMenu(null); }}
+          onFavorite={() => { updateProject(project.id, (item) => ({ ...item, favorite: !item.favorite })); setProjectMenu(null); }}
+          onDelete={() => { setConfirm({ kind: "project", projectId: project.id, label: project.name }); setProjectMenu(null); }}
+        />;
+      })()}
+
+      {confirm && <ConfirmDialog label={confirm.label} onCancel={() => setConfirm(null)} onConfirm={executeDelete} />}
     </main>
   );
 }
 
-function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
-  const tasks = project.items.filter((item) => item.type === "task" && !item.archived);
-  const done = tasks.filter((item) => item.status === "done").length;
-  const progress = tasks.length ? Math.round((done / tasks.length) * 100) : project.status === "done" ? 100 : 0;
-  const next = tasks
-    .filter((item) => item.status !== "done" && item.dueDate)
-    .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""))[0];
-
+function ProjectContextMenu({
+  project,
+  position,
+  onRename,
+  onFavorite,
+  onDelete,
+}: {
+  project: Project;
+  position: { x: number; y: number };
+  onRename: () => void;
+  onFavorite: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <button className="project-card" onClick={onOpen}>
-      <span className={`project-symbol ${project.accent}`}><PIcon name={project.icon} size={24} /></span>
-      <span className="project-card-main">
-        <span className="project-card-title"><strong>{project.name}</strong>{project.favorite && <PIcon name="star" size={16} />}</span>
-        <span className="project-card-description">{project.goal || project.description}</span>
-        <span className="project-progress"><i><b style={{ width: `${progress}%` }} /></i><small>{progress}%</small></span>
-        <span className="project-card-meta">
-          <small>{done} из {tasks.length} задач</small>
-          {next?.dueDate && <small className={next.dueDate < dateKey() ? "overdue" : ""}><PIcon name="clock" size={14} />{localDate(next.dueDate)}</small>}
-        </span>
-      </span>
-      <PIcon name="chevron" size={20} />
-    </button>
-  );
-}
-
-function ProjectEmpty({ archived, onCreate }: { archived: boolean; onCreate: () => void }) {
-  return (
-    <div className="project-empty">
-      <span className="project-empty-icon"><PIcon name={archived ? "archive" : "rocket"} size={31} /></span>
-      <h2>{archived ? "Архив проектов пуст" : "Создайте первый проект"}</h2>
-      <p>{archived ? "Завершённые и отложенные проекты можно хранить здесь." : "Выберите готовый шаблон или начните с чистого листа. Этапы и стартовые задачи появятся автоматически."}</p>
-      {!archived && <button onClick={onCreate}><PIcon name="plus" size={19} />Создать проект</button>}
+    <div className="project-context-menu" role="menu" style={{ left: position.x, top: position.y }}>
+      <button role="menuitem" onClick={onRename}><Icon name="edit" size={19} />Переименовать</button>
+      <button role="menuitem" onClick={onFavorite}><Icon name="star" size={19} />{project.favorite ? "Убрать из избранного" : "В избранное"}</button>
+      <button role="menuitem" className="danger" onClick={onDelete}><Icon name="trash" size={19} />Удалить</button>
     </div>
   );
 }
 
-function ProjectViewContent({
-  project,
-  view,
-  filter,
-  setFilter,
-  onEdit,
-  onStatus,
+function RenameProjectSheet({
+  value,
+  onChange,
+  onClose,
+  onSave,
 }: {
-  project: Project;
-  view: ProjectView;
-  filter: "all" | TaskStatus;
-  setFilter: (filter: "all" | TaskStatus) => void;
-  onEdit: (item: ProjectItem) => void;
-  onStatus: (id: string, status: TaskStatus) => void;
+  value: { id: string; name: string };
+  onChange: (value: { id: string; name: string }) => void;
+  onClose: () => void;
+  onSave: () => void;
 }) {
-  const activeItems = project.items.filter((item) => !item.archived);
-  const tasks = activeItems.filter((item) => item.type === "task");
-  const done = tasks.filter((item) => item.status === "done").length;
-  const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
-  const overdue = tasks.filter((item) => item.status !== "done" && item.dueDate && item.dueDate < dateKey()).length;
-  const upcoming = tasks.filter((item) => item.status !== "done" && item.dueDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""))[0];
-
-  if (view === "overview") {
-    return (
-      <div className="project-overview">
-        <section className="project-hero-card">
-          <p>Цель проекта</p>
-          <h2>{project.goal || "Добавьте цель, чтобы не терять направление"}</h2>
-          <div className="hero-progress"><span><b>{progress}%</b> выполнено</span><i><b style={{ width: `${progress}%` }} /></i></div>
-        </section>
-        <div className="metric-grid">
-          <div><span>Открыто</span><strong>{tasks.length - done}</strong><small>задач</small></div>
-          <div><span>Просрочено</span><strong className={overdue ? "danger-text" : ""}>{overdue}</strong><small>требуют внимания</small></div>
-          <div><span>Ближайший срок</span><strong className="metric-date">{upcoming?.dueDate ? localDate(upcoming.dueDate) : "—"}</strong><small>{upcoming?.title || "не назначен"}</small></div>
-          <div><span>Материалы</span><strong>{activeItems.length - tasks.length}</strong><small>записей</small></div>
-        </div>
-        <section className="stage-section">
-          <div className="section-line"><h2>Этапы</h2><span>{project.stages.filter((stage) => stage.done).length}/{project.stages.length}</span></div>
-          <div className="stages-track">
-            {project.stages.map((stage, index) => {
-              const stageTasks = tasks.filter((item) => item.stageId === stage.id);
-              const stageDone = stageTasks.filter((item) => item.status === "done").length;
-              return (
-                <div className={`stage-card ${stage.done ? "done" : ""}`} key={stage.id}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <strong>{stage.name}</strong>
-                  <small>{stageTasks.length ? `${stageDone}/${stageTasks.length} задач` : "Пока без задач"}</small>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-        <section className="next-actions">
-          <div className="section-line"><h2>Следующие действия</h2></div>
-          {tasks.filter((item) => item.status !== "done").slice(0, 4).map((item) => (
-            <TaskRow key={item.id} item={item} project={project} onOpen={() => onEdit(item)} onStatus={(status) => onStatus(item.id, status)} />
-          ))}
-          {!tasks.some((item) => item.status !== "done") && <p className="inline-empty">Добавьте первую задачу — она появится здесь.</p>}
-        </section>
-      </div>
-    );
-  }
-
-  if (view === "list") {
-    const shown = activeItems.filter((item) => filter === "all" || item.status === filter);
-    return (
-      <section className="project-list-view">
-        <div className="filter-chips scrollable">
-          {(["all", "backlog", "todo", "doing", "done"] as const).map((value) => (
-            <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{value === "all" ? "Все" : statusLabels[value]}</button>
-          ))}
-        </div>
-        <div className="project-items-list">
-          {shown.map((item) => (
-            <article className="project-item-row" key={item.id}>
-              <button className={`task-check ${item.status === "done" ? "done" : ""}`} aria-label={item.status === "done" ? "Вернуть задачу" : "Завершить"} onClick={() => onStatus(item.id, item.status === "done" ? "todo" : "done")}>
-                {item.status === "done" && <PIcon name="check" size={16} />}
-              </button>
-              <button className="project-item-copy" onClick={() => onEdit(item)}>
-                <span><strong>{item.title}</strong><small>{typeLabels[item.type]}{item.dueDate ? ` · ${localDate(item.dueDate)}` : ""}</small></span>
-                <span className={`priority-dot ${item.priority}`} aria-label={`Приоритет: ${priorityLabels[item.priority]}`} />
-              </button>
-            </article>
-          ))}
-          {!shown.length && <p className="inline-empty">Здесь пока ничего нет.</p>}
-        </div>
-      </section>
-    );
-  }
-
-  if (view === "board") {
-    return (
-      <div className="kanban-board">
-        {(["backlog", "todo", "doing", "done"] as TaskStatus[]).map((status) => {
-          const columnItems = tasks.filter((item) => item.status === status);
-          return (
-            <section className={`kanban-column ${status}`} key={status}>
-              <header><strong>{statusLabels[status]}</strong><span>{columnItems.length}</span></header>
-              <div>
-                {columnItems.map((item) => (
-                  <article className="kanban-card" key={item.id}>
-                    <button className="kanban-main" onClick={() => onEdit(item)}>
-                      <span className={`priority-label ${item.priority}`}>{priorityLabels[item.priority]}</span>
-                      <strong>{item.title}</strong>
-                      {item.dueDate && <small className={item.dueDate < dateKey() && status !== "done" ? "overdue" : ""}><PIcon name="calendar" size={14} />{localDate(item.dueDate)}</small>}
-                    </button>
-                    <div className="status-stepper">
-                      {status !== "backlog" && <button aria-label="Переместить назад" onClick={() => onStatus(item.id, (["backlog", "todo", "doing", "done"] as TaskStatus[])[(["backlog", "todo", "doing", "done"] as TaskStatus[]).indexOf(status) - 1])}><PIcon name="back" size={17} /></button>}
-                      {status !== "done" && <button aria-label="Переместить вперёд" onClick={() => onStatus(item.id, (["backlog", "todo", "doing", "done"] as TaskStatus[])[(["backlog", "todo", "doing", "done"] as TaskStatus[]).indexOf(status) + 1])}><PIcon name="chevron" size={17} /></button>}
-                    </div>
-                  </article>
-                ))}
-                {!columnItems.length && <span className="kanban-empty">Пока пусто</span>}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-    );
-  }
-
-  if (view === "timeline") {
-    const dated = activeItems.filter((item) => item.dueDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
-    return (
-      <section className="timeline-view">
-        <div className="timeline-head">
-          <div><span>Начало</span><strong>{project.startDate ? localDate(project.startDate) : "Не указано"}</strong></div>
-          <i />
-          <div><span>Срок проекта</span><strong>{project.dueDate ? localDate(project.dueDate) : "Не указан"}</strong></div>
-        </div>
-        <div className="timeline-list">
-          {dated.map((item) => (
-            <button key={item.id} className={item.status === "done" ? "done" : ""} onClick={() => onEdit(item)}>
-              <time dateTime={item.dueDate}>{localDate(item.dueDate)}</time>
-              <span><i /><strong>{item.title}</strong><small>{typeLabels[item.type]} · {statusLabels[item.status]}</small></span>
-            </button>
-          ))}
-          {!dated.length && <p className="inline-empty">Назначьте сроки задачам и этапам — здесь появится хронология.</p>}
-        </div>
-      </section>
-    );
-  }
-
-  const statusCounts = (["backlog", "todo", "doing", "done"] as TaskStatus[]).map((status) => ({
-    status,
-    count: tasks.filter((item) => item.status === status).length,
-  }));
-  const maxCount = Math.max(1, ...statusCounts.map((item) => item.count));
-  const checklist = activeItems.flatMap((item) => item.checklist);
-  const checklistDone = checklist.filter((item) => item.done).length;
   return (
-    <section className="stats-view">
-      <div className="stats-highlight">
-        <span className="stats-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><strong>{progress}%</strong></span>
-        <div><h2>{done === tasks.length && tasks.length ? "Проект готов" : "Проект движется"}</h2><p>{done} из {tasks.length} задач завершено</p></div>
-      </div>
-      <div className="status-chart" role="img" aria-label={`Распределение задач: ${statusCounts.map(({ status, count }) => `${statusLabels[status]} ${count}`).join(", ")}`}>
-        {statusCounts.map(({ status, count }) => (
-          <div key={status}><span>{statusLabels[status]}</span><i><b className={status} style={{ width: `${(count / maxCount) * 100}%` }} /></i><strong>{count}</strong></div>
+    <Sheet onClose={onClose} compact>
+      <form onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+        <div className="project-sheet-header"><button type="button" onClick={onClose}>Отмена</button><strong>Название</strong><button type="submit">Готово</button></div>
+        <div className="project-sheet-scroll"><label className="project-field"><span>Название проекта</span><input autoFocus value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} /></label></div>
+      </form>
+    </Sheet>
+  );
+}
+
+function ProjectBoard({
+  columns,
+  onChange,
+  onConfirmDelete,
+  onConfirmDeleteTask,
+  haptics,
+}: {
+  columns: BoardColumn[];
+  onChange: (columns: BoardColumn[]) => void;
+  onConfirmDelete: (column: BoardColumn) => void;
+  onConfirmDeleteTask: (columnId: string, task: BoardTask) => void;
+  haptics: boolean;
+}) {
+  const [addingColumn, setAddingColumn] = useState(false);
+  const [columnTitle, setColumnTitle] = useState("");
+  const [addingTaskTo, setAddingTaskTo] = useState<string | null>(null);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [editingColumn, setEditingColumn] = useState<{ id: string; title: string } | null>(null);
+  const [activeTask, setActiveTask] = useState<BoardTask | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 140, tolerance: 8 } }),
+  );
+
+  const addColumn = (event: FormEvent) => {
+    event.preventDefault();
+    if (!columnTitle.trim()) return;
+    onChange([...columns, { id: uid("column"), title: columnTitle.trim(), color: ["blue", "purple", "orange", "green", "pink"][columns.length % 5], tasks: [] }]);
+    setColumnTitle("");
+    setAddingColumn(false);
+    pulse(haptics);
+  };
+
+  const addTask = (event: FormEvent, columnId: string) => {
+    event.preventDefault();
+    if (!taskTitle.trim()) return;
+    onChange(columns.map((column) => column.id === columnId ? {
+      ...column,
+      tasks: [...column.tasks, { id: uid("task"), title: taskTitle.trim(), done: false, createdAt: new Date().toISOString() }],
+    } : column));
+    setTaskTitle("");
+    setAddingTaskTo(null);
+    pulse(haptics);
+  };
+
+  const finishDrag = (event: DragEndEvent) => {
+    setActiveTask(null);
+    document.body.classList.remove("is-reordering");
+    if (!event.over) return;
+    const activeData = event.active.data.current as { columnId?: string } | undefined;
+    const overData = event.over.data.current as { columnId?: string; type?: string } | undefined;
+    const sourceId = activeData?.columnId;
+    const targetId = overData?.columnId || (columns.some((column) => column.id === event.over?.id) ? String(event.over.id) : undefined);
+    if (!sourceId || !targetId) return;
+    const source = columns.find((column) => column.id === sourceId);
+    const task = source?.tasks.find((item) => item.id === event.active.id);
+    if (!task) return;
+
+    if (sourceId === targetId) {
+      const column = columns.find((item) => item.id === sourceId);
+      if (!column) return;
+      const oldIndex = column.tasks.findIndex((item) => item.id === event.active.id);
+      const newIndex = column.tasks.findIndex((item) => item.id === event.over?.id);
+      if (oldIndex >= 0 && newIndex >= 0 && oldIndex !== newIndex) {
+        onChange(columns.map((item) => item.id === sourceId ? { ...item, tasks: arrayMove(item.tasks, oldIndex, newIndex) } : item));
+      }
+      return;
+    }
+
+    onChange(columns.map((column) => {
+      if (column.id === sourceId) return { ...column, tasks: column.tasks.filter((item) => item.id !== task.id) };
+      if (column.id === targetId) {
+        const overIndex = column.tasks.findIndex((item) => item.id === event.over?.id);
+        const next = [...column.tasks];
+        next.splice(overIndex < 0 ? next.length : overIndex, 0, task);
+        return { ...column, tasks: next };
+      }
+      return column;
+    }));
+    pulse(haptics, [9, 22, 9]);
+  };
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      autoScroll={{ threshold: { x: 0.18, y: 0.18 }, acceleration: 12, interval: 5 }}
+      onDragStart={(event: DragStartEvent) => {
+        const columnId = (event.active.data.current as { columnId?: string } | undefined)?.columnId;
+        setActiveTask(columns.find((column) => column.id === columnId)?.tasks.find((task) => task.id === event.active.id) || null);
+        document.body.classList.add("is-reordering");
+        pulse(haptics, 18);
+      }}
+      onDragCancel={() => { setActiveTask(null); document.body.classList.remove("is-reordering"); }}
+      onDragEnd={finishDrag}
+    >
+      <div className="trello-board">
+        {columns.map((column) => (
+          <BoardColumnView
+            column={column}
+            key={column.id}
+            adding={addingTaskTo === column.id}
+            taskTitle={addingTaskTo === column.id ? taskTitle : ""}
+            editing={editingColumn?.id === column.id ? editingColumn.title : null}
+            onTaskTitle={setTaskTitle}
+            onStartAdd={() => { setAddingTaskTo(column.id); setTaskTitle(""); }}
+            onCancelAdd={() => setAddingTaskTo(null)}
+            onAddTask={(event) => addTask(event, column.id)}
+            onToggle={(taskId) => onChange(columns.map((item) => item.id === column.id ? { ...item, tasks: item.tasks.map((task) => task.id === taskId ? { ...task, done: !task.done } : task) } : item))}
+                onDeleteTask={(taskId) => {
+                  const task = column.tasks.find((item) => item.id === taskId);
+                  if (task) onConfirmDeleteTask(column.id, task);
+                }}
+            onStartRename={() => setEditingColumn({ id: column.id, title: column.title })}
+            onRenameValue={(title) => setEditingColumn({ id: column.id, title })}
+            onFinishRename={() => {
+              if (editingColumn?.title.trim()) onChange(columns.map((item) => item.id === column.id ? { ...item, title: editingColumn.title.trim() } : item));
+              setEditingColumn(null);
+            }}
+            onDeleteColumn={() => onConfirmDelete(column)}
+          />
         ))}
+        <section className="add-board-column">
+          {addingColumn ? (
+            <form onSubmit={addColumn}>
+              <input autoFocus value={columnTitle} onChange={(event) => setColumnTitle(event.target.value)} placeholder="Название группы" onKeyDown={(event) => { if (event.key === "Escape") setAddingColumn(false); }} />
+              <div><button type="submit">Добавить</button><button type="button" onClick={() => setAddingColumn(false)}>Отмена</button></div>
+            </form>
+          ) : <button onClick={() => setAddingColumn(true)}><Icon name="plus" size={19} />Добавить группу</button>}
+        </section>
       </div>
-      <div className="stats-cards">
-        <div><span>Чек-листы</span><strong>{checklistDone}/{checklist.length}</strong></div>
-        <div><span>Просрочено</span><strong>{overdue}</strong></div>
-        <div><span>Решений</span><strong>{activeItems.filter((item) => item.type === "decision").length}</strong></div>
-        <div><span>Рисков</span><strong>{activeItems.filter((item) => item.type === "risk").length}</strong></div>
-      </div>
+      {activeTask && <div className="visually-hidden" aria-live="polite">Перемещается задача {activeTask.title}</div>}
+    </DndContext>
+  );
+}
+
+function BoardColumnView({
+  column,
+  adding,
+  taskTitle,
+  editing,
+  onTaskTitle,
+  onStartAdd,
+  onCancelAdd,
+  onAddTask,
+  onToggle,
+  onDeleteTask,
+  onStartRename,
+  onRenameValue,
+  onFinishRename,
+  onDeleteColumn,
+}: {
+  column: BoardColumn;
+  adding: boolean;
+  taskTitle: string;
+  editing: string | null;
+  onTaskTitle: (value: string) => void;
+  onStartAdd: () => void;
+  onCancelAdd: () => void;
+  onAddTask: (event: FormEvent) => void;
+  onToggle: (taskId: string) => void;
+  onDeleteTask: (taskId: string) => void;
+  onStartRename: () => void;
+  onRenameValue: (value: string) => void;
+  onFinishRename: () => void;
+  onDeleteColumn: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: column.id, data: { type: "column", columnId: column.id } });
+  const [menu, setMenu] = useState(false);
+  return (
+    <section ref={setNodeRef} className={`trello-column ${isOver ? "is-over" : ""}`}>
+      <header>
+        <span className={`column-dot ${column.color}`} />
+        {editing !== null ? <input autoFocus value={editing} onChange={(event) => onRenameValue(event.target.value)} onBlur={onFinishRename} onKeyDown={(event) => { if (event.key === "Enter") onFinishRename(); }} /> : <strong>{column.title}</strong>}
+        <span className="column-count">{column.tasks.length}</span>
+        <button aria-label={`Меню группы ${column.title}`} onClick={() => setMenu((value) => !value)}><Icon name="more" size={19} /></button>
+        {menu && <div className="column-menu"><button onClick={() => { onStartRename(); setMenu(false); }}><Icon name="edit" size={17} />Переименовать</button><button className="danger" onClick={() => { onDeleteColumn(); setMenu(false); }}><Icon name="trash" size={17} />Удалить группу</button></div>}
+      </header>
+      <SortableContext items={column.tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+        <div className="trello-tasks">
+          {column.tasks.map((task) => <SortableBoardTask task={task} columnId={column.id} key={task.id} onToggle={() => onToggle(task.id)} onDelete={() => onDeleteTask(task.id)} />)}
+          {!column.tasks.length && <span className="column-empty">Задач пока нет</span>}
+        </div>
+      </SortableContext>
+      {adding ? (
+        <form className="quick-task-form" onSubmit={onAddTask}>
+          <textarea autoFocus value={taskTitle} onChange={(event) => onTaskTitle(event.target.value)} placeholder="Название задачи" onKeyDown={(event) => { if (event.key === "Escape") onCancelAdd(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+          <div><button type="submit">Добавить</button><button type="button" onClick={onCancelAdd}>Отмена</button></div>
+        </form>
+      ) : <button className="add-task-button" onClick={onStartAdd}><Icon name="plus" size={18} />Добавить задачу</button>}
     </section>
   );
 }
 
-function TaskRow({ item, project, onOpen, onStatus }: { item: ProjectItem; project: Project; onOpen: () => void; onStatus: (status: TaskStatus) => void }) {
+/* eslint-disable react-hooks/refs -- dnd-kit exposes sortable bindings that are intentionally consumed during render. */
+function SortableBoardTask({ task, columnId, onToggle, onDelete }: { task: BoardTask; columnId: string; onToggle: () => void; onDelete: () => void }) {
+  const sortable = useSortable({ id: task.id, data: { type: "task", columnId } });
   return (
-    <article className="today-task">
-      <button className={`task-check ${item.status === "done" ? "done" : ""}`} aria-label={item.status === "done" ? "Вернуть задачу" : "Завершить"} onClick={() => onStatus(item.status === "done" ? "todo" : "done")}>
-        {item.status === "done" && <PIcon name="check" size={16} />}
-      </button>
-      <button onClick={onOpen}>
-        <strong>{item.title}</strong>
-        <span>{project.name}{item.dueDate ? ` · ${item.dueDate < dateKey() ? "Просрочено " : ""}${localDate(item.dueDate)}` : ""}</span>
-      </button>
-      <span className={`priority-dot ${item.priority}`} aria-label={`Приоритет: ${priorityLabels[item.priority]}`} />
+    <article
+      ref={sortable.setNodeRef}
+      className={`trello-task ${task.done ? "done" : ""} ${sortable.isDragging ? "dragging" : ""}`}
+      style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+      {...sortable.attributes}
+      {...sortable.listeners}
+    >
+      <button className={`board-check ${task.done ? "done" : ""}`} aria-label={task.done ? "Вернуть задачу" : "Выполнить задачу"} onPointerDown={(event) => event.stopPropagation()} onClick={onToggle}>{task.done && <Icon name="check" size={15} />}</button>
+      <span>{task.title}</span>
+      <button className="task-delete" aria-label={`Удалить задачу ${task.title}`} onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}><Icon name="trash" size={16} /></button>
     </article>
   );
 }
 
-function ItemSheet({
-  draft,
-  project,
+function ProjectNotes({
+  notes,
   onChange,
-  onClose,
-  onSave,
+  onEdit,
+  onDelete,
+  onCreate,
+  haptics,
+}: {
+  notes: ProjectNote[];
+  onChange: (notes: ProjectNote[]) => void;
+  onEdit: (note: ProjectNote) => void;
+  onDelete: (note: ProjectNote) => void;
+  onCreate: () => void;
+  haptics: boolean;
+}) {
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }));
+  return (
+    <DndContext sensors={sensors} autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }} onDragStart={() => pulse(haptics, 18)} onDragEnd={(event) => {
+      if (!event.over || event.active.id === event.over.id) return;
+      const from = notes.findIndex((note) => note.id === event.active.id);
+      const to = notes.findIndex((note) => note.id === event.over?.id);
+      if (from >= 0 && to >= 0) onChange(arrayMove(notes, from, to));
+    }}>
+      <SortableContext items={notes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
+        <div className="project-notes-grid">
+          {notes.map((note) => <SortableProjectNote note={note} key={note.id} onEdit={() => onEdit(note)} onDelete={() => onDelete(note)} />)}
+        </div>
+      </SortableContext>
+      {!notes.length && <div className="workspace-empty"><span><Icon name="note" size={29} /></span><h2>Заметок пока нет</h2><p>Добавляйте отдельные смысловые блоки и свободно меняйте их порядок.</p></div>}
+      <button className="project-fab" aria-label="Создать заметку" onClick={onCreate}><Icon name="plus" size={27} /></button>
+    </DndContext>
+  );
+}
+
+function SortableProjectNote({ note, onEdit, onDelete }: { note: ProjectNote; onEdit: () => void; onDelete: () => void }) {
+  const sortable = useSortable({ id: note.id });
+  return (
+    <article ref={sortable.setNodeRef} className={`project-note-card ${sortable.isDragging ? "dragging" : ""}`} style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }} {...sortable.attributes} {...sortable.listeners}>
+      <div className="project-note-meta"><span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span><Icon name="grip" size={17} /></div>
+      <button className="project-note-open" onPointerDown={(event) => event.stopPropagation()} onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
+      <button className="project-note-delete" aria-label="Удалить заметку" onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}><Icon name="trash" size={17} /></button>
+    </article>
+  );
+}
+/* eslint-enable react-hooks/refs */
+
+function DocumentWorkspace({
+  documents,
+  onChange,
+  onConfirmDelete,
+  haptics,
+}: {
+  documents: ProjectDocument[];
+  onChange: (documents: ProjectDocument[]) => void;
+  onConfirmDelete: (document: ProjectDocument) => void;
+  haptics: boolean;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [create, setCreate] = useState<{ type: "folder" | "page"; parentId: string | null } | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [rename, setRename] = useState<ProjectDocument | null>(null);
+  const selected = documents.find((document) => document.id === selectedId && document.type === "page");
+
+  const addDocument = (event: FormEvent) => {
+    event.preventDefault();
+    if (!create || !newTitle.trim()) return;
+    const stamp = new Date().toISOString();
+    const document: ProjectDocument = { id: uid(create.type), type: create.type, parentId: create.parentId, title: newTitle.trim(), content: "", createdAt: stamp, updatedAt: stamp };
+    onChange([...documents, document]);
+    if (create.parentId) setExpanded((current) => new Set(current).add(create.parentId!));
+    if (create.type === "page") setSelectedId(document.id);
+    setCreate(null);
+    setNewTitle("");
+    pulse(haptics);
+  };
+
+  const updateSelected = (patch: Partial<ProjectDocument>) => {
+    if (!selected) return;
+    onChange(documents.map((document) => document.id === selected.id ? { ...document, ...patch, updatedAt: new Date().toISOString() } : document));
+  };
+
+  const insert = (prefix: string) => updateSelected({ content: `${selected?.content || ""}${selected?.content ? "\n" : ""}${prefix}` });
+
+  return (
+    <div className={`document-workspace ${selected ? "page-open" : ""}`}>
+      <aside className="document-tree">
+        <div className="document-tree-head"><strong>Документы</strong><div><button aria-label="Новая страница" onClick={() => { setCreate({ type: "page", parentId: null }); setNewTitle(""); }}><Icon name="page" size={18} /></button><button aria-label="Новая папка" onClick={() => { setCreate({ type: "folder", parentId: null }); setNewTitle(""); }}><Icon name="folderPlus" size={18} /></button></div></div>
+        <DocumentLevel
+          parentId={null}
+          documents={documents}
+          expanded={expanded}
+          selectedId={selectedId}
+          onToggle={(id) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
+          onOpen={setSelectedId}
+          onAdd={(type, parentId) => { setCreate({ type, parentId }); setNewTitle(""); }}
+          onRename={setRename}
+          onDelete={onConfirmDelete}
+        />
+        {!documents.length && <div className="document-tree-empty"><Icon name="page" size={26} /><span>Создайте папку или первую страницу</span></div>}
+      </aside>
+      <section className="document-editor">
+        {selected ? (
+          <>
+            <header className="document-editor-mobile-head"><button onClick={() => setSelectedId(null)}><Icon name="back" size={21} />Документы</button></header>
+            <div className="document-breadcrumbs"><span>{documents.find((node) => node.id === selected.parentId)?.title || "Проект"}</span><Icon name="chevron" size={15} /><strong>{selected.title || "Без названия"}</strong></div>
+            <input className="document-title" aria-label="Название документа" value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} placeholder="Без названия" />
+            <div className="document-toolbar" aria-label="Инструменты документа">
+              <button onClick={() => insert("# ")} title="Заголовок"><Icon name="heading" size={18} /></button>
+              <button onClick={() => insert("- ")} title="Список"><Icon name="list" size={18} /></button>
+              <button onClick={() => insert("- [ ] ")} title="Задача"><Icon name="check" size={18} /></button>
+              <button onClick={() => insert("> ")} title="Цитата"><Icon name="quote" size={18} /></button>
+              <select aria-label="Переместить в папку" value={selected.parentId || ""} onChange={(event) => updateSelected({ parentId: event.target.value || null })}>
+                <option value="">В корне проекта</option>
+                {documents.filter((node) => node.type === "folder" && node.id !== selected.id).map((folder) => <option value={folder.id} key={folder.id}>{folder.title}</option>)}
+              </select>
+            </div>
+            <textarea className="document-content" aria-label="Содержимое документа" value={selected.content} onChange={(event) => updateSelected({ content: event.target.value })} placeholder={"Начните писать…\n\nПоддерживается Markdown: # заголовок, - список, - [ ] задача"} />
+            <span className="document-saved">Сохраняется автоматически</span>
+          </>
+        ) : <div className="document-placeholder"><span><Icon name="page" size={32} /></span><h2>Выберите документ</h2><p>Или создайте новую страницу в дереве слева.</p></div>}
+      </section>
+
+      {create && <Sheet onClose={() => setCreate(null)} compact><form onSubmit={addDocument}><div className="project-sheet-header"><button type="button" onClick={() => setCreate(null)}>Отмена</button><strong>{create.type === "folder" ? "Новая папка" : "Новая страница"}</strong><button type="submit">Создать</button></div><div className="project-sheet-scroll"><label className="project-field"><span>Название</span><input autoFocus value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={create.type === "folder" ? "Название папки" : "Название документа"} /></label></div></form></Sheet>}
+      {rename && <Sheet onClose={() => setRename(null)} compact><form onSubmit={(event) => { event.preventDefault(); if (!rename.title.trim()) return; onChange(documents.map((document) => document.id === rename.id ? { ...document, title: rename.title.trim(), updatedAt: new Date().toISOString() } : document)); setRename(null); }}><div className="project-sheet-header"><button type="button" onClick={() => setRename(null)}>Отмена</button><strong>Переименовать</strong><button type="submit">Готово</button></div><div className="project-sheet-scroll"><label className="project-field"><span>Название</span><input autoFocus value={rename.title} onChange={(event) => setRename({ ...rename, title: event.target.value })} /></label></div></form></Sheet>}
+    </div>
+  );
+}
+
+function DocumentLevel({
+  parentId,
+  documents,
+  expanded,
+  selectedId,
+  onToggle,
+  onOpen,
+  onAdd,
+  onRename,
   onDelete,
 }: {
-  draft: ProjectItem;
-  project: Project;
-  onChange: (item: ProjectItem) => void;
-  onClose: () => void;
-  onSave: (event: FormEvent) => void;
-  onDelete?: () => void;
+  parentId: string | null;
+  documents: ProjectDocument[];
+  expanded: Set<string>;
+  selectedId: string | null;
+  onToggle: (id: string) => void;
+  onOpen: (id: string) => void;
+  onAdd: (type: "folder" | "page", parentId: string) => void;
+  onRename: (document: ProjectDocument) => void;
+  onDelete: (document: ProjectDocument) => void;
 }) {
-  const set = <K extends keyof ProjectItem>(key: K, value: ProjectItem[K]) => onChange({ ...draft, [key]: value });
   return (
-    <div className="project-sheet-layer" role="presentation">
-      <form className="project-sheet item-editor-sheet" onSubmit={onSave}>
-        <div className="sheet-grabber" />
-        <div className="project-sheet-header">
-          <button type="button" onClick={onClose}>Отмена</button>
-          <strong>{typeLabels[draft.type]}</strong>
-          <button type="submit" disabled={!draft.title.trim()}>Готово</button>
-        </div>
-        <div className="project-sheet-scroll">
-          <fieldset className="type-picker">
-            <legend>Тип записи</legend>
-            <div>{(Object.keys(typeLabels) as ProjectItemType[]).map((type) => (
-              <button type="button" key={type} className={draft.type === type ? "selected" : ""} onClick={() => set("type", type)}>
-                <PIcon name={typeIcons[type]} size={18} />{typeLabels[type]}
-              </button>
-            ))}</div>
-          </fieldset>
-          <label className="project-field"><span>Название</span><input autoFocus value={draft.title} onChange={(event) => set("title", event.target.value)} placeholder="Что нужно сделать или сохранить?" /></label>
-          <label className="project-field"><span>Описание</span><textarea value={draft.body} onChange={(event) => set("body", event.target.value)} placeholder="Детали, контекст, результат…" /></label>
-          <div className="project-field-grid">
-            <label className="project-field"><span>Статус</span><select value={draft.status} onChange={(event) => set("status", event.target.value as TaskStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label className="project-field"><span>Приоритет</span><select value={draft.priority} onChange={(event) => set("priority", event.target.value as TaskPriority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+    <div className="document-level">
+      {documents.filter((document) => document.parentId === parentId).map((document) => (
+        <div className="document-node-wrap" key={document.id}>
+          <div className={`document-node ${selectedId === document.id ? "selected" : ""}`}>
+            <button className="document-node-main" onClick={() => document.type === "folder" ? onToggle(document.id) : onOpen(document.id)}>
+              {document.type === "folder" ? <Icon name={expanded.has(document.id) ? "down" : "chevron"} size={16} /> : <span />}
+              <Icon name={document.type === "folder" ? "folder" : "page"} size={18} />
+              <span>{document.title || "Без названия"}</span>
+            </button>
+            <details>
+              <summary aria-label={`Меню ${document.title}`}><Icon name="more" size={18} /></summary>
+              <div>
+                {document.type === "folder" && <><button onClick={() => onAdd("page", document.id)}><Icon name="page" size={16} />Страница</button><button onClick={() => onAdd("folder", document.id)}><Icon name="folderPlus" size={16} />Папка</button></>}
+                <button onClick={() => onRename(document)}><Icon name="edit" size={16} />Переименовать</button>
+                <button className="danger" onClick={() => onDelete(document)}><Icon name="trash" size={16} />Удалить</button>
+              </div>
+            </details>
           </div>
-          <div className="project-field-grid">
-            <label className="project-field"><span>Начало</span><input type="date" value={draft.startDate || ""} onChange={(event) => set("startDate", event.target.value || undefined)} /></label>
-            <label className="project-field"><span>Срок</span><input type="date" value={draft.dueDate || ""} onChange={(event) => set("dueDate", event.target.value || undefined)} /></label>
-          </div>
-          <label className="project-field"><span>Этап</span><select value={draft.stageId || ""} onChange={(event) => set("stageId", event.target.value || undefined)}><option value="">Без этапа</option>{project.stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>
-          <label className="project-field"><span>Теги</span><input value={draft.tags.join(", ")} onChange={(event) => set("tags", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} placeholder="дизайн, релиз, важно" /></label>
-          {draft.type === "link" && <label className="project-field"><span>Ссылка</span><input type="url" value={draft.url || ""} onChange={(event) => set("url", event.target.value)} placeholder="https://…" /></label>}
-          {draft.type === "task" && (
-            <>
-              <label className="project-field"><span>Чек-лист</span><textarea value={draft.checklist.map((item) => item.text).join("\n")} onChange={(event) => set("checklist", event.target.value.split("\n").filter(Boolean).map((text, index) => ({ id: draft.checklist[index]?.id || `check-${Date.now()}-${index}`, text, done: draft.checklist[index]?.done || false })))} placeholder={"Один пункт на строку\nПроверить детали\nПодготовить результат"} /></label>
-              <label className="project-field"><span>Блокирует работу</span><input value={draft.blockedReason || ""} onChange={(event) => set("blockedReason", event.target.value || undefined)} placeholder="Оставьте пустым, если блокировок нет" /></label>
-            </>
-          )}
-          {onDelete && <button type="button" className="project-delete-button" onClick={onDelete}><PIcon name="trash" size={19} />Удалить запись</button>}
+          {document.type === "folder" && expanded.has(document.id) && <DocumentLevel parentId={document.id} documents={documents} expanded={expanded} selectedId={selectedId} onToggle={onToggle} onOpen={onOpen} onAdd={onAdd} onRename={onRename} onDelete={onDelete} />}
         </div>
-      </form>
+      ))}
+    </div>
+  );
+}
+
+function Sheet({ children, onClose, compact = false }: { children: ReactNode; onClose: () => void; compact?: boolean }) {
+  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
+  const drag = useRef<{ y: number; pointerId: number } | null>(null);
+
+  const finishDrag = () => {
+    if (!drag.current) return;
+    if (offsetRef.current > 120) onClose();
+    offsetRef.current = 0;
+    setOffset(0);
+    drag.current = null;
+  };
+
+  return (
+    <div
+      className="project-sheet-layer keyboard-aware-layer"
+      role="presentation"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className={`project-sheet ${compact ? "compact-sheet" : ""}`} style={{ transform: `translateY(${offset}px)` }} role="dialog" aria-modal="true">
+        <button
+          type="button"
+          className="sheet-grabber sheet-grabber-button"
+          aria-label="Потяните вниз, чтобы закрыть"
+          onPointerDown={(event) => {
+            drag.current = { y: event.clientY, pointerId: event.pointerId };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+            const next = Math.max(-18, Math.min(event.clientY - drag.current.y, window.innerHeight * .65));
+            offsetRef.current = next;
+            setOffset(next);
+          }}
+          onPointerUp={finishDrag}
+          onPointerCancel={finishDrag}
+        />
+        <div className="project-sheet-body">{children}</div>
+      </section>
     </div>
   );
 }
@@ -794,12 +914,7 @@ function ItemSheet({
 function ConfirmDialog({ label, onCancel, onConfirm }: { label: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div className="project-confirm-layer" role="alertdialog" aria-modal="true" aria-labelledby="project-confirm-title">
-      <div className="project-confirm">
-        <span><PIcon name="trash" size={25} /></span>
-        <h2 id="project-confirm-title">Удалить «{label || "эту запись"}»?</h2>
-        <p>Это действие нельзя отменить.</p>
-        <div><button onClick={onCancel}>Отмена</button><button className="danger" onClick={onConfirm}>Удалить</button></div>
-      </div>
+      <div className="project-confirm"><span><Icon name="trash" size={25} /></span><h2 id="project-confirm-title">Удалить «{label}»?</h2><p>Это действие нельзя отменить.</p><div><button onClick={onCancel}>Отмена</button><button className="danger" onClick={onConfirm}>Удалить</button></div></div>
     </div>
   );
 }
