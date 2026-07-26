@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/core";
 import {
   arrayMove,
+  rectSortingStrategy,
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
@@ -795,7 +796,7 @@ export default function DiaryApp() {
               onDragCancel={cancelDrag}
               onDragEnd={finishSectionDrag}
             >
-              <SortableContext items={data.sections.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={data.sections.map((item) => item.id)} strategy={rectSortingStrategy}>
                 <div className="section-list">
                   {data.sections.map((sectionItem) => (
                     <SortableSection id={sectionItem.id} key={sectionItem.id}>

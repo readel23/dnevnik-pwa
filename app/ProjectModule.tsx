@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/core";
 import {
   arrayMove,
+  rectSortingStrategy,
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
@@ -724,7 +725,7 @@ function ProjectNotes({
         <div><strong>{showArchive ? "Архив заметок" : "Заметки проекта"}</strong><span>{visibleNotes.length}</span></div>
         <button onClick={() => setShowArchive((value) => !value)}><Icon name={showArchive ? "back" : "archive"} size={18} />{showArchive ? "К заметкам" : `Архив · ${notes.filter((note) => note.archived).length}`}</button>
       </div>
-      <SortableContext items={visibleNotes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={visibleNotes.map((note) => note.id)} strategy={rectSortingStrategy}>
         <div className="project-notes-grid">
           {visibleNotes.map((note) => <SortableProjectNote
             note={note}
