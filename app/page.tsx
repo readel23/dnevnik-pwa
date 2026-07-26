@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import DiaryApp from "./DiaryApp";
 
 export const metadata: Metadata = {
-  title: "Дневник",
+  title: "Dnevnik",
   description: "Личный дневник, заметки и проекты — всегда под рукой.",
 };
 

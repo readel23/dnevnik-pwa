@@ -9,16 +9,16 @@ const geist = Geist({
 
 export const metadata: Metadata = {
   title: {
-    default: "Дневник",
-    template: "%s — Дневник",
+    default: "Dnevnik",
+    template: "%s — Dnevnik",
   },
   description: "Личный дневник, заметки и проекты — всегда под рукой.",
-  applicationName: "Дневник",
+  applicationName: "Dnevnik",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Дневник",
+    title: "Dnevnik",
   },
   icons: {
     icon: "/favicon.svg",

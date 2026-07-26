@@ -1,6 +1,6 @@
 {
-  "name": "Дневник — заметки и проекты",
-  "short_name": "Дневник",
+  "name": "Dnevnik — заметки и проекты",
+  "short_name": "Dnevnik",
   "description": "Личный дневник, заметки и проекты — всегда под рукой.",
   "start_url": "./",
   "display": "standalone",

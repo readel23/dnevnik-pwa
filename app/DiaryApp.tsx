@@ -42,7 +42,8 @@ type IconName =
   | "folder" | "cube" | "pen" | "train" | "heart" | "bulb"
   | "message" | "cart" | "clapper" | "archive" | "edit" | "trash"
   | "moon" | "globe" | "download" | "help" | "info" | "logout"
-  | "bell" | "shield" | "crown" | "grip" | "restore" | "sun" | "search";
+  | "bell" | "shield" | "crown" | "grip" | "restore" | "sun" | "search"
+  | "eye" | "eyeOff";
 
 const iconPaths: Record<IconName, string[]> = {
   plus: ["M12 5v14", "M5 12h14"],
@@ -76,6 +77,8 @@ const iconPaths: Record<IconName, string[]> = {
   grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
   restore: ["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
   search: ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"],
+  eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
+  eyeOff: ["m3 3 18 18", "M10.6 5.2A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a15.8 15.8 0 0 1-2.1 3.1", "M6.2 6.2C3.5 8.1 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.5 4.5-1.2", "M9.9 9.9a3 3 0 0 0 4.2 4.2"],
 };
 
 function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
@@ -1641,6 +1644,7 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 }
 
 function AuthGate({ onToast }: { onToast: (message: string) => void }) {
+  const [screen, setScreen] = useState<"welcome" | "register" | "login">("welcome");
   const [message, setMessage] = useState("");
 
   const report = (nextMessage: string) => {
@@ -1648,21 +1652,65 @@ function AuthGate({ onToast }: { onToast: (message: string) => void }) {
     onToast(nextMessage);
   };
 
+  if (screen !== "welcome") {
+    return (
+      <main className="auth-gate auth-gate-flow">
+        <AuthPanel
+          key={screen}
+          initialMode={screen}
+          onClose={() => setScreen("welcome")}
+          onToast={report}
+          embedded
+        />
+        {message && <div className="auth-message auth-gate-message" role="status">{message}</div>}
+      </main>
+    );
+  }
+
   return (
-    <main className="auth-gate">
-      <section className="auth-intro">
-        <span className="auth-mark"><Icon name="pen" size={30} /></span>
-        <p className="eyebrow">{todayLabel()}</p>
-        <h1>Дневник</h1>
-        <p>Личное пространство для мыслей, планов и проектов. Ваш дневник откроется после входа.</p>
-        <div className="auth-benefits" aria-hidden="true">
-          <span><Icon name="shield" size={19} />Приватно</span>
-          <span><Icon name="archive" size={19} />Всегда под рукой</span>
+    <main className="auth-gate auth-gate-welcome">
+      <section className="auth-showcase" aria-hidden="true">
+        <div className="auth-brand">
+          <span className="auth-logo">D</span>
+          <strong>Dnevnik</strong>
+        </div>
+        <div className="auth-note-collage">
+          <article className="auth-note-card auth-note-card-one">
+            <span>Сегодня</span>
+            <strong>Мысли, которые хочется сохранить</strong>
+            <i /><i /><i />
+          </article>
+          <article className="auth-note-card auth-note-card-two">
+            <span>Идеи</span>
+            <strong>Начать с малого</strong>
+            <i /><i />
+          </article>
+          <article className="auth-note-card auth-note-card-three">
+            <span>Проекты</span>
+            <strong>План на неделю</strong>
+            <i /><i /><i />
+          </article>
+          <article className="auth-note-card auth-note-card-four">
+            <span>Личное</span>
+            <strong>Не забыть этот день</strong>
+            <i /><i />
+          </article>
+          <span className="auth-floating-word">планы</span>
+          <span className="auth-floating-word second">идеи</span>
         </div>
       </section>
-      <section className="auth-card">
-        <AuthPanel onClose={() => undefined} onToast={report} embedded />
-        {message && <div className="auth-message" role="status">{message}</div>}
+      <section className="auth-welcome-content">
+        <div className="auth-lockup">
+          <span className="auth-logo auth-logo-large">D</span>
+          <span>Dnevnik</span>
+        </div>
+        <h1>Соберите мысли<br />в одном месте.</h1>
+        <p>Личный дневник для заметок, идей и проектов — всегда рядом.</p>
+        <div className="auth-welcome-actions">
+          <button type="button" className="auth-primary-action" onClick={() => setScreen("register")}>Регистрация</button>
+          <button type="button" className="auth-secondary-action" onClick={() => setScreen("login")}>Вход</button>
+        </div>
+        <p className="auth-legal">Продолжая, вы принимаете условия использования и политику конфиденциальности Dnevnik.</p>
       </section>
     </main>
   );
@@ -1672,23 +1720,64 @@ function AuthPanel({
   onClose,
   onToast,
   embedded = false,
+  initialMode = "register",
 }: {
   onClose: () => void;
   onToast: (message: string) => void;
   embedded?: boolean;
+  initialMode?: "register" | "login";
 }) {
-  const [mode, setMode] = useState<"register" | "login">("register");
+  const [mode, setMode] = useState<"register" | "login">(initialMode);
+  const [registerStep, setRegisterStep] = useState(0);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const switchMode = (nextMode: "register" | "login") => {
+    setMode(nextMode);
+    setRegisterStep(0);
+    setError("");
+    setPassword("");
+    setConfirmPassword("");
+  };
+
+  const goBack = () => {
+    if (mode === "register" && registerStep > 0) {
+      setRegisterStep((step) => step - 1);
+      setError("");
+      return;
+    }
+    onClose();
+  };
+
+  const validateCurrentStep = () => {
+    if (registerStep === 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Введите корректный адрес электронной почты.");
+      return false;
+    }
+    if (registerStep === 1 && !/^[a-z0-9_]{3,24}$/.test(username.trim().toLowerCase())) {
+      setError("Никнейм: 3–24 символа, латиница, цифры и _.");
+      return false;
+    }
+    if (registerStep === 2 && fullName.trim().length < 2) {
+      setError("Введите имя.");
+      return false;
+    }
+    return true;
+  };
 
   const submitAuth = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    if (mode === "register" && registerStep < 3) {
+      if (validateCurrentStep()) setRegisterStep((step) => step + 1);
+      return;
+    }
     if (!supabase) {
       setError("Сервис входа временно недоступен. Попробуйте позже.");
       return;
@@ -1760,12 +1849,61 @@ function AuthPanel({
     onClose();
   };
 
+  const registrationCopy = [
+    {
+      eyebrow: "Шаг 1 из 4",
+      title: "Укажите адрес электронной почты",
+      description: "Он понадобится для входа и восстановления аккаунта.",
+    },
+    {
+      eyebrow: "Шаг 2 из 4",
+      title: "Придумайте никнейм",
+      description: "Он будет уникальным именем вашего профиля.",
+    },
+    {
+      eyebrow: "Шаг 3 из 4",
+      title: "Как вас зовут?",
+      description: "Так мы будем обращаться к вам в приложении.",
+    },
+    {
+      eyebrow: "Шаг 4 из 4",
+      title: "Создайте пароль",
+      description: "Используйте не менее 8 символов.",
+    },
+  ][registerStep];
+
+  const canContinue = mode === "login"
+    ? Boolean(email.trim() && password)
+    : registerStep === 0
+      ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      : registerStep === 1
+        ? /^[a-z0-9_]{3,24}$/.test(username.trim().toLowerCase())
+        : registerStep === 2
+          ? fullName.trim().length >= 2
+          : password.length >= 8 && confirmPassword.length >= 8;
+
   return (
-    <form className="auth-panel" onSubmit={submitAuth}>
+    <form className={`auth-panel ${embedded ? "auth-panel-flow" : ""}`} onSubmit={submitAuth}>
+      {embedded && (
+        <header className="auth-flow-header">
+          <button type="button" className="auth-back-button" onClick={goBack} aria-label="Назад">
+            <Icon name="back" size={25} />
+          </button>
+          {mode === "register" ? (
+            <div className="auth-progress" aria-label={`Шаг ${registerStep + 1} из 4`}>
+              {[0, 1, 2, 3].map((step) => <span key={step} className={step === registerStep ? "active" : step < registerStep ? "done" : ""} />)}
+            </div>
+          ) : (
+            <strong className="auth-flow-title">Вход</strong>
+          )}
+          <span className="auth-header-spacer" />
+        </header>
+      )}
       {embedded ? (
-        <div className="auth-card-heading">
-          <span>Добро пожаловать</span>
-          <h2>{mode === "register" ? "Создайте аккаунт" : "Войдите в дневник"}</h2>
+        <div className="auth-card-heading auth-flow-heading">
+          <span>{mode === "register" ? registrationCopy.eyebrow : "С возвращением"}</span>
+          <h2>{mode === "register" ? registrationCopy.title : "Войдите в Dnevnik"}</h2>
+          <p>{mode === "register" ? registrationCopy.description : "Продолжите с того места, где остановились."}</p>
         </div>
       ) : (
         <div className="sheet-header panel-header">
@@ -1774,28 +1912,44 @@ function AuthPanel({
           <button type="submit" className="text-button" disabled={submitting}>{submitting ? "…" : "Готово"}</button>
         </div>
       )}
-      <div className="auth-tabs" role="tablist">
-        <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
-        <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
-      </div>
       {!isSupabaseConfigured && <div className="config-note">Сервис входа временно недоступен.</div>}
       <div className="auth-fields">
-        <label>Почта<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></label>
-        {mode === "register" && (
+        {(mode === "login" || registerStep === 0) && (
+          <label>Электронная почта<input type="email" inputMode="email" autoCapitalize="none" autoComplete="email" autoFocus value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></label>
+        )}
+        {mode === "register" && registerStep === 1 && (
+          <label>Никнейм<input autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus value={username} onChange={(event) => setUsername(event.target.value)} placeholder="nickname" /></label>
+        )}
+        {mode === "register" && registerStep === 2 && (
+          <label>Имя<input autoComplete="name" autoFocus value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Ваше имя" /></label>
+        )}
+        {(mode === "login" || registerStep === 3) && (
           <>
-            <label>Уникальный никнейм<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="nickname" /></label>
-            <label>Имя<input autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Ваше имя" /></label>
+            <label>
+              Пароль
+              <span className="auth-password-field">
+                <input type={showPassword ? "text" : "password"} autoComplete={mode === "register" ? "new-password" : "current-password"} autoFocus={mode === "register"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "register" ? "Не менее 8 символов" : "Введите пароль"} />
+                <button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>
+                  <Icon name={showPassword ? "eyeOff" : "eye"} size={22} />
+                </button>
+              </span>
+            </label>
+            {mode === "register" && (
+              <label>Подтверждение пароля<input type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" /></label>
+            )}
           </>
         )}
-        <label>Пароль<input type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Не менее 8 символов" /></label>
-        {mode === "register" && (
-          <label>Подтверждение пароля<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" /></label>
-        )}
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button wide-button" disabled={submitting} type="submit">
-          {submitting ? "Подождите…" : mode === "register" ? "Создать аккаунт" : "Войти"}
+        <button className="auth-continue-button" disabled={submitting || !canContinue} type="submit">
+          {submitting ? "Подождите…" : mode === "register" && registerStep < 3 ? "Далее" : mode === "register" ? "Создать аккаунт" : "Войти"}
         </button>
       </div>
+      <p className="auth-mode-switch">
+        {mode === "register" ? "Уже есть аккаунт?" : "Ещё нет аккаунта?"}
+        <button type="button" onClick={() => switchMode(mode === "register" ? "login" : "register")}>
+          {mode === "register" ? "Войти" : "Зарегистрироваться"}
+        </button>
+      </p>
     </form>
   );
 }
