@@ -243,7 +243,7 @@ export default function ProjectModule({
 
   if (activeProject) {
     return (
-      <main className="screen project-detail-screen project-workspace" onPointerDown={(event) => {
+      <main id="app-main" className="screen project-detail-screen project-workspace" onPointerDown={(event) => {
         if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu, .project-more")) setProjectMenu(null);
       }}>
         <header className="project-detail-header simple">
@@ -338,6 +338,7 @@ export default function ProjectModule({
 
   return (
     <main
+      id="app-main"
       className="screen projects-screen clean-projects-screen"
       onPointerDown={(event) => {
         if (projectMenu && !(event.target as HTMLElement).closest(".project-context-menu")) setProjectMenu(null);
@@ -362,8 +363,8 @@ export default function ProjectModule({
       <header className="projects-header">
         <div><p className="eyebrow">Рабочее пространство</p><h1>Проекты</h1></div>
         <div className="header-actions">
-          <button className="round-button" aria-label="Создать проект" onClick={() => setCreateOpen(true)}><Icon name="plus" size={27} /></button>
-          <button className="round-button" aria-label="Открыть профиль" onClick={onProfile}><Icon name="user" size={26} /></button>
+          <button className="round-button desktop-primary-action" aria-label="Создать проект" onClick={() => setCreateOpen(true)}><Icon name="plus" size={27} /><span>Новый проект</span></button>
+          <button className="round-button mobile-profile-action" aria-label="Открыть профиль" onClick={onProfile}><Icon name="user" size={26} /></button>
         </div>
       </header>
 

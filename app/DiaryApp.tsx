@@ -23,7 +23,6 @@ import {
   rectSortingStrategy,
   SortableContext,
   useSortable,
-  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { isSupabaseConfigured, supabase } from "./supabase";
@@ -745,11 +744,28 @@ export default function DiaryApp() {
   }
 
   return (
-    <div className="app-shell" onPointerDown={(event) => {
+    <div className="app-shell desktop-workspace-shell" onPointerDown={(event) => {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
+      <a className="skip-link" href="#app-main">К основному содержимому</a>
+      <DesktopSidebar
+        active={view === "profile" ? "profile" : view === "home" ? appMode : "notes"}
+        modules={modules}
+        displayName={displayName}
+        displayUsername={displayUsername}
+        onNotes={() => {
+          setAppMode("notes");
+          goHome();
+        }}
+        onProjects={() => {
+          setAppMode("projects");
+          goHome();
+        }}
+        onProfile={() => setView("profile")}
+      />
       {view === "home" && appMode === "notes" && modules.notes && (
         <main
+          id="app-main"
           className="screen home-screen"
           onPointerDown={startModuleSwipe}
           onPointerUp={finishModuleSwipe}
@@ -758,13 +774,14 @@ export default function DiaryApp() {
           <header className="home-header">
             <div>
               <p className="eyebrow">{todayLabel()}</p>
-              <h1>Дневник</h1>
+              <h1><span className="mobile-page-title">Дневник</span><span className="desktop-page-title">Заметки</span></h1>
             </div>
             <div className="header-actions">
-              <button className="round-button" aria-label="Создать раздел" onClick={() => { setSheet("section"); setDraftName(""); }}>
+              <button className="round-button desktop-primary-action" aria-label="Создать раздел" onClick={() => { setSheet("section"); setDraftName(""); }}>
                 <Icon name="plus" size={27} />
+                <span>Новый раздел</span>
               </button>
-              <button className="round-button" aria-label="Открыть профиль" onClick={() => setView("profile")}>
+              <button className="round-button mobile-profile-action" aria-label="Открыть профиль" onClick={() => setView("profile")}>
                 <Icon name="user" size={26} />
               </button>
             </div>
@@ -891,7 +908,7 @@ export default function DiaryApp() {
       )}
 
       {view === "profile" && (
-        <main className="screen profile-screen">
+        <main id="app-main" className="screen profile-screen">
           <ScreenHeader title="Профиль" onBack={goHome} />
           <button className="profile-hero" onClick={() => setProfilePanel("account")}>
             <span className="avatar"><Icon name="user" size={48} /></span>
@@ -957,7 +974,7 @@ export default function DiaryApp() {
       )}
 
       {view === "subsection" && active && subsection && section && (
-        <main className="screen subsection-screen">
+        <main id="app-main" className="screen subsection-screen">
           <ContentHeader
             onBack={goHome}
             title={<><span>{section.name}</span><Icon name="chevron" size={19} /><strong>{subsection.name}</strong></>}
@@ -984,7 +1001,7 @@ export default function DiaryApp() {
               onDragCancel={cancelDrag}
               onDragEnd={finishBlockDrag}
             >
-              <SortableContext items={subsection.blocks.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={subsection.blocks.map((item) => item.id)} strategy={rectSortingStrategy}>
                 <div className="blocks-list">
                   {subsection.blocks.map((block) => (
                     <SortableSwipeBlock
@@ -1011,7 +1028,7 @@ export default function DiaryApp() {
       )}
 
       {view === "archive" && (
-        <main className="screen archive-screen">
+        <main id="app-main" className="screen archive-screen">
           <ContentHeader
             title={archiveScope === "active" && subsection ? `Архив · ${subsection.name}` : "Архив"}
             onBack={() => setView(archiveScope === "active" && active ? "subsection" : "profile")}
@@ -1344,6 +1361,51 @@ function ContentHeader({
       <div className="content-header-title">{title}</div>
       <div className="content-header-action">{action}</div>
     </header>
+  );
+}
+
+function DesktopSidebar({
+  active,
+  modules,
+  displayName,
+  displayUsername,
+  onNotes,
+  onProjects,
+  onProfile,
+}: {
+  active: "notes" | "projects" | "profile";
+  modules: EnabledModules;
+  displayName: string;
+  displayUsername: string;
+  onNotes: () => void;
+  onProjects: () => void;
+  onProfile: () => void;
+}) {
+  return (
+    <aside className="desktop-sidebar" aria-label="Основная навигация">
+      <div className="desktop-brand">
+        <span><Icon name="pen" size={20} /></span>
+        <strong>Дневник</strong>
+      </div>
+      <nav className="desktop-nav">
+        <p>Рабочее пространство</p>
+        {modules.notes && (
+          <button className={active === "notes" ? "active" : ""} aria-current={active === "notes" ? "page" : undefined} onClick={onNotes}>
+            <Icon name="pen" size={20} /><span>Заметки</span>
+          </button>
+        )}
+        {modules.projects && (
+          <button className={active === "projects" ? "active" : ""} aria-current={active === "projects" ? "page" : undefined} onClick={onProjects}>
+            <Icon name="cube" size={20} /><span>Проекты</span>
+          </button>
+        )}
+      </nav>
+      <button className={`desktop-account ${active === "profile" ? "active" : ""}`} onClick={onProfile}>
+        <span className="desktop-avatar"><Icon name="user" size={20} /></span>
+        <span><strong>{displayName}</strong><small>{displayUsername}</small></span>
+        <Icon name="chevron" size={18} />
+      </button>
+    </aside>
   );
 }
 

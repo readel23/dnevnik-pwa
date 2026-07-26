@@ -102,6 +102,30 @@ textarea:focus {
   min-height: 100dvh;
 }
 
+.desktop-sidebar,
+.desktop-page-title,
+.desktop-primary-action > span {
+  display: none;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 2000;
+  top: 12px;
+  left: 12px;
+  transform: translateY(-150%);
+  border-radius: 10px;
+  background: var(--accent);
+  padding: 10px 14px;
+  color: white;
+  text-decoration: none;
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 .screen {
   width: min(100%, 820px);
   min-height: 100dvh;
@@ -4753,6 +4777,571 @@ button:disabled {
 
   .project-workspace {
     padding-inline: 48px;
+  }
+}
+
+/* True desktop application shell */
+@media (min-width: 1024px) {
+  :root {
+    --desktop-sidebar-width: 244px;
+  }
+
+  body {
+    background: var(--bg);
+  }
+
+  .desktop-workspace-shell {
+    min-height: 100dvh;
+    padding-left: var(--desktop-sidebar-width);
+  }
+
+  .desktop-sidebar {
+    position: fixed;
+    z-index: 180;
+    inset: 0 auto 0 0;
+    display: flex;
+    width: var(--desktop-sidebar-width);
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 94%, var(--accent) 6%), var(--bg-elevated));
+    padding: 24px 16px 18px;
+  }
+
+  .desktop-brand {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    gap: 11px;
+    padding: 0 10px;
+  }
+
+  .desktop-brand > span {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+
+  .desktop-brand strong {
+    font-size: 1.08rem;
+    letter-spacing: -.025em;
+  }
+
+  .desktop-nav {
+    display: grid;
+    gap: 5px;
+    margin-top: 34px;
+  }
+
+  .desktop-nav > p {
+    margin: 0 10px 8px;
+    color: var(--text-tertiary);
+    font-size: .68rem;
+    font-weight: 720;
+    letter-spacing: .085em;
+    text-transform: uppercase;
+  }
+
+  .desktop-nav button {
+    display: grid;
+    width: 100%;
+    min-height: 44px;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    border-radius: 11px;
+    background: transparent;
+    padding: 0 12px;
+    color: var(--text-secondary);
+    text-align: left;
+    transition: background 160ms ease, color 160ms ease;
+  }
+
+  .desktop-nav button:hover {
+    background: var(--surface-soft);
+    color: var(--text);
+  }
+
+  .desktop-nav button.active {
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface-soft));
+    color: var(--accent-strong);
+    font-weight: 680;
+    box-shadow: inset 3px 0 var(--accent);
+  }
+
+  .desktop-account {
+    display: grid;
+    width: 100%;
+    min-height: 62px;
+    grid-template-columns: 36px minmax(0, 1fr) 18px;
+    align-items: center;
+    gap: 10px;
+    margin-top: auto;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: transparent;
+    padding: 8px 9px;
+    color: var(--text);
+    text-align: left;
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+
+  .desktop-account:hover,
+  .desktop-account.active {
+    border-color: var(--border);
+    background: var(--surface-soft);
+  }
+
+  .desktop-avatar {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface-soft));
+    color: var(--accent-strong);
+  }
+
+  .desktop-account > span:nth-child(2) {
+    display: grid;
+    min-width: 0;
+  }
+
+  .desktop-account strong,
+  .desktop-account small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .desktop-account strong {
+    font-size: .83rem;
+  }
+
+  .desktop-account small {
+    color: var(--text-tertiary);
+    font-size: .68rem;
+  }
+
+  .screen,
+  .home-screen,
+  .clean-projects-screen,
+  .project-workspace {
+    width: min(100%, 1440px);
+    margin: 0 auto;
+    padding: 32px 44px 64px;
+  }
+
+  .home-header,
+  .projects-header {
+    min-height: 76px;
+    align-items: center;
+    margin: 0 0 22px;
+    padding: 0;
+  }
+
+  .home-header .eyebrow,
+  .projects-header .eyebrow {
+    margin-bottom: 3px;
+    color: var(--text-tertiary);
+    font-size: .71rem;
+  }
+
+  .home-header h1,
+  .projects-header h1 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 740;
+    letter-spacing: -.045em;
+    line-height: 1.1;
+  }
+
+  .mobile-page-title {
+    display: none;
+  }
+
+  .desktop-page-title {
+    display: inline;
+  }
+
+  .desktop-primary-action {
+    display: inline-flex;
+    width: auto;
+    height: 44px;
+    align-items: center;
+    gap: 8px;
+    border-radius: 12px;
+    background: var(--accent);
+    padding: 0 16px;
+    color: white;
+    font-size: .84rem;
+    font-weight: 680;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+
+  .desktop-primary-action:hover {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--accent) 88%, white 12%);
+  }
+
+  .desktop-primary-action > span {
+    display: inline;
+  }
+
+  .mobile-profile-action {
+    display: none;
+  }
+
+  .home-screen > .module-switcher,
+  .clean-projects-screen > .module-switcher {
+    display: none;
+  }
+
+  .home-screen .section-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+    row-gap: 24px;
+  }
+
+  .diary-section {
+    align-self: start;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+    padding: 9px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .07);
+  }
+
+  .section-heading {
+    min-height: 44px;
+    margin-bottom: 4px;
+    padding-left: 10px;
+  }
+
+  .section-heading h2 {
+    color: var(--text);
+    font-size: .94rem;
+    font-weight: 690;
+  }
+
+  .subsection-card {
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .subsection-row {
+    min-height: 58px;
+    border-radius: 10px;
+  }
+
+  .subsection-row:hover {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-soft));
+  }
+
+  .subsection-row .tile-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .row-divider {
+    left: 58px;
+  }
+
+  .gesture-hint {
+    display: none;
+  }
+
+  .clean-projects-screen .project-search {
+    width: min(100%, 480px);
+    min-height: 44px;
+    margin-bottom: 22px;
+    background: var(--surface-soft);
+  }
+
+  .clean-project-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 0;
+  }
+
+  .clean-project-card {
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
+  }
+
+  .project-card-open {
+    min-height: 86px;
+    grid-template-columns: 44px minmax(0, 1fr) 20px;
+    gap: 12px;
+    padding: 13px 50px 13px 14px;
+  }
+
+  .project-card-open .project-symbol {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+  }
+
+  .project-card-menu-button {
+    top: 21px;
+    right: 8px;
+  }
+
+  .project-detail-header.simple {
+    min-height: 62px;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+    margin-bottom: 10px;
+    padding: 0;
+  }
+
+  .project-back,
+  .project-more {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+  }
+
+  .project-title-copy > span {
+    display: none;
+  }
+
+  .project-detail-header.simple h1 {
+    font-size: 1.45rem;
+  }
+
+  .workspace-tabs {
+    position: static;
+    max-width: 430px;
+    margin-bottom: 24px;
+    border-radius: 12px;
+    background: var(--surface-soft);
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .workspace-tabs button {
+    min-height: 38px;
+    border-radius: 9px;
+  }
+
+  .trello-board {
+    min-height: calc(100dvh - 178px);
+    gap: 14px;
+    margin: 0;
+    padding: 0 0 24px;
+  }
+
+  .trello-column,
+  .add-board-column {
+    width: 300px;
+    flex-basis: 300px;
+    border-radius: 14px;
+  }
+
+  .trello-column {
+    padding: 10px;
+  }
+
+  .trello-task {
+    min-height: 52px;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+
+  .add-task-button,
+  .add-board-column > button {
+    min-height: 40px;
+  }
+
+  .project-notes-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .project-note-card {
+    min-height: 170px;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .07);
+  }
+
+  .document-workspace {
+    grid-template-columns: 280px minmax(0, 1fr);
+    min-height: calc(100dvh - 165px);
+  }
+
+  .document-tree {
+    max-height: calc(100dvh - 165px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface) 74%, transparent);
+    padding: 10px;
+  }
+
+  .document-editor {
+    min-height: calc(100dvh - 165px);
+    padding: 16px 44px 28px 54px;
+  }
+
+  .document-title {
+    margin-top: 4px;
+    font-size: 2.25rem;
+  }
+
+  .document-content {
+    min-height: 520px;
+    padding-top: 18px;
+  }
+
+  .subsection-screen,
+  .archive-screen {
+    width: min(100%, 1220px);
+  }
+
+  .unified-content-header {
+    min-height: 62px;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    margin-bottom: 20px;
+    padding: 0;
+  }
+
+  .unified-content-header .project-back {
+    background: var(--surface-soft);
+  }
+
+  .unified-content-header .content-header-title {
+    font-size: 1.18rem;
+  }
+
+  .subsection-screen .blocks-list,
+  .archive-screen .archive-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+  }
+
+  .swipe-wrap,
+  .note-block,
+  .archive-item {
+    min-width: 0;
+  }
+
+  .note-block {
+    min-height: 180px;
+    border-radius: 15px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
+  }
+
+  .archive-item {
+    min-height: 150px;
+    border-radius: 15px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
+  }
+
+  .floating-add {
+    position: sticky;
+    right: auto;
+    bottom: 24px;
+    float: right;
+    width: auto;
+    height: 46px;
+    margin-top: 18px;
+    border-radius: 13px;
+    padding: 0 16px;
+  }
+
+  .floating-add::after {
+    margin-left: 8px;
+    content: "Новая запись";
+    font-size: .82rem;
+    font-weight: 680;
+  }
+
+  .profile-screen {
+    width: min(100%, 1120px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 18px;
+  }
+
+  .profile-screen .screen-header,
+  .profile-screen .profile-hero,
+  .profile-screen .logout-row {
+    grid-column: 1 / -1;
+  }
+
+  .profile-screen .screen-header {
+    min-height: 70px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .profile-screen .screen-header .back {
+    display: none;
+  }
+
+  .profile-screen .screen-header h1 {
+    font-size: 2rem;
+  }
+
+  .profile-hero {
+    min-height: 132px;
+    grid-template-columns: 82px minmax(0, 1fr) 24px;
+    border-radius: 18px;
+    padding: 18px 22px;
+  }
+
+  .profile-hero .avatar {
+    width: 70px;
+    height: 70px;
+  }
+
+  .settings-group {
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .07);
+  }
+
+  .settings-row {
+    min-height: 64px;
+    grid-template-columns: 46px minmax(0, 1fr) auto 22px;
+  }
+
+  .profile-screen .logout-row {
+    min-height: 58px;
+    border-radius: 16px;
+  }
+}
+
+@media (min-width: 1380px) {
+  :root {
+    --desktop-sidebar-width: 260px;
+  }
+
+  .screen,
+  .home-screen,
+  .clean-projects-screen,
+  .project-workspace {
+    padding-inline: 52px;
+  }
+
+  .clean-project-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .home-screen .section-list {
+    column-gap: 24px;
+  }
+
+  .profile-screen {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
