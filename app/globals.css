@@ -104,6 +104,7 @@ textarea:focus {
 
 .desktop-sidebar,
 .desktop-page-title,
+.desktop-top-search,
 .desktop-primary-action > span {
   display: none;
 }
@@ -5342,6 +5343,404 @@ button:disabled {
 
   .profile-screen {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Desktop window layout — based on the approved desktop reference */
+@media (min-width: 1024px) {
+  :root {
+    --desktop-sidebar-width: 238px;
+  }
+
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 48rem),
+      color-mix(in srgb, var(--bg) 88%, var(--text) 12%);
+  }
+
+  .desktop-workspace-shell {
+    position: relative;
+    width: min(1480px, calc(100vw - 48px));
+    height: calc(100dvh - 48px);
+    min-height: 0;
+    overflow: hidden;
+    margin: 0 auto;
+    border: 1px solid color-mix(in srgb, var(--border) 76%, var(--text) 24%);
+    border-radius: 24px;
+    background: var(--bg-elevated);
+    padding-left: var(--desktop-sidebar-width);
+    box-shadow: 0 28px 70px rgba(0, 0, 0, .2);
+  }
+
+  .desktop-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--desktop-sidebar-width);
+    border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 84%, var(--bg) 16%);
+    padding: 20px 14px 18px;
+  }
+
+  .desktop-window-controls {
+    display: flex;
+    gap: 8px;
+    height: 28px;
+    align-items: flex-start;
+    padding: 0 7px;
+  }
+
+  .desktop-window-controls span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .09);
+  }
+
+  .desktop-window-controls span:nth-child(1) { background: #ff5f57; }
+  .desktop-window-controls span:nth-child(2) { background: #febc2e; }
+  .desktop-window-controls span:nth-child(3) { background: #28c840; }
+
+  .desktop-brand {
+    min-height: 58px;
+    margin: 3px 2px 30px;
+    padding-inline: 8px;
+  }
+
+  .desktop-brand > span {
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 11px;
+    background: color-mix(in srgb, #f2aa16 14%, transparent);
+    color: #f2aa16;
+    box-shadow: none;
+  }
+
+  .desktop-brand strong {
+    font-size: 1.12rem;
+  }
+
+  .desktop-nav {
+    gap: 6px;
+    margin-top: 0;
+  }
+
+  .desktop-nav > p {
+    display: none;
+  }
+
+  .desktop-nav button {
+    min-height: 46px;
+    border-radius: 11px;
+    padding-inline: 13px;
+    color: var(--text-secondary);
+    font-size: .88rem;
+  }
+
+  .desktop-nav button.active {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    box-shadow: none;
+    color: var(--text);
+  }
+
+  .desktop-account {
+    min-height: 74px;
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    padding: 10px;
+  }
+
+  .desktop-account:hover,
+  .desktop-account.active {
+    background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+  }
+
+  .screen,
+  .home-screen,
+  .clean-projects-screen,
+  .project-workspace,
+  .subsection-screen,
+  .archive-screen,
+  .profile-screen {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    margin: 0;
+    padding: 30px 38px 54px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text-tertiary) 45%, transparent) transparent;
+  }
+
+  .screen::-webkit-scrollbar {
+    width: 9px;
+  }
+
+  .screen::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--text-tertiary) 42%, transparent);
+    background-clip: padding-box;
+  }
+
+  .home-header,
+  .projects-header {
+    display: grid;
+    min-height: 64px;
+    grid-template-columns: minmax(210px, 1fr) minmax(260px, 380px) auto;
+    align-items: center;
+    gap: 22px;
+    margin-bottom: 28px;
+  }
+
+  .home-header h1,
+  .projects-header h1 {
+    font-size: 1.85rem;
+    letter-spacing: -.04em;
+  }
+
+  .home-header .eyebrow,
+  .projects-header .eyebrow {
+    display: none;
+  }
+
+  .desktop-top-search {
+    display: grid;
+    min-height: 44px;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--text) 4.5%, transparent);
+    padding: 0 14px;
+    color: var(--text-tertiary);
+  }
+
+  .desktop-top-search input {
+    min-height: 42px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    font-size: .91rem;
+  }
+
+  .desktop-top-search:focus-within {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-soft));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+  }
+
+  .header-actions {
+    align-items: center;
+  }
+
+  .desktop-primary-action,
+  .mobile-profile-action {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--surface);
+    padding: 0;
+    color: var(--text);
+    box-shadow: 0 7px 18px rgba(0, 0, 0, .08);
+  }
+
+  .desktop-primary-action > span {
+    display: none;
+  }
+
+  .mobile-profile-action {
+    color: var(--text-secondary);
+  }
+
+  .home-screen .section-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 25px;
+  }
+
+  .diary-section {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .section-heading {
+    min-height: 38px;
+    grid-template-columns: minmax(0, 1fr) 36px 36px 36px;
+    margin: 0 0 7px;
+    padding: 0 2px;
+  }
+
+  .section-heading h2 {
+    padding-left: 0;
+    color: var(--text-secondary);
+    font-size: .91rem;
+    font-weight: 650;
+  }
+
+  .section-collapse-button,
+  .section-drag-handle {
+    width: 36px;
+    height: 36px;
+    opacity: 0;
+    transition: opacity 150ms ease, background 150ms ease;
+  }
+
+  .diary-section:hover .section-collapse-button,
+  .diary-section:hover .section-drag-handle,
+  .section-collapse-button:focus-visible,
+  .section-drag-handle:focus-visible {
+    opacity: 1;
+  }
+
+  .section-heading .more-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .subsection-card {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    background: var(--surface);
+    box-shadow: 0 9px 24px rgba(0, 0, 0, .07);
+  }
+
+  .subsection-row {
+    min-height: 58px;
+    grid-template-columns: 48px minmax(0, 1fr) 24px;
+    border-radius: 0;
+    padding: 0 16px;
+  }
+
+  .subsection-row:hover {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+  }
+
+  .subsection-row .tile-icon {
+    width: 35px;
+    height: 35px;
+    border-radius: 10px;
+  }
+
+  .subsection-row .row-label {
+    font-size: .94rem;
+  }
+
+  .row-divider {
+    left: 64px;
+  }
+
+  .desktop-search-empty {
+    min-height: 42vh;
+  }
+
+  .clean-projects-screen {
+    position: relative;
+  }
+
+  .clean-projects-screen .project-search {
+    position: absolute;
+    z-index: 2;
+    top: 40px;
+    left: 50%;
+    width: min(380px, 36%);
+    min-height: 44px;
+    transform: translateX(-50%);
+    border: 0;
+    background: color-mix(in srgb, var(--text) 4.5%, transparent);
+  }
+
+  .clean-project-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 0;
+  }
+
+  .clean-project-card {
+    border-radius: 15px;
+    box-shadow: 0 9px 24px rgba(0, 0, 0, .07);
+  }
+
+  .project-card-open {
+    min-height: 72px;
+    grid-template-columns: 42px minmax(0, 1fr) 20px;
+    padding-block: 10px;
+  }
+
+  .project-card-menu-button {
+    top: 14px;
+  }
+
+  .project-workspace {
+    padding-top: 28px;
+  }
+
+  .project-detail-header.simple {
+    min-height: 54px;
+  }
+
+  .workspace-tabs {
+    margin-top: 8px;
+  }
+
+  .profile-screen {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1380px) {
+  :root {
+    --desktop-sidebar-width: 250px;
+  }
+
+  .screen,
+  .home-screen,
+  .clean-projects-screen,
+  .project-workspace,
+  .subsection-screen,
+  .archive-screen,
+  .profile-screen {
+    padding-inline: 42px;
+  }
+
+  .home-screen .section-list,
+  .clean-project-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1024px) and (max-height: 760px) {
+  body {
+    padding: 14px;
+  }
+
+  .desktop-workspace-shell {
+    width: calc(100vw - 28px);
+    height: calc(100dvh - 28px);
+  }
+
+  .desktop-sidebar {
+    padding-top: 14px;
+  }
+
+  .desktop-brand {
+    margin-bottom: 16px;
   }
 }
 

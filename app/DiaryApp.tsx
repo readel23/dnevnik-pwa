@@ -41,7 +41,7 @@ type IconName =
   | "folder" | "cube" | "pen" | "train" | "heart" | "bulb"
   | "message" | "cart" | "clapper" | "archive" | "edit" | "trash"
   | "moon" | "globe" | "download" | "help" | "info" | "logout"
-  | "bell" | "shield" | "crown" | "grip" | "restore" | "sun";
+  | "bell" | "shield" | "crown" | "grip" | "restore" | "sun" | "search";
 
 const iconPaths: Record<IconName, string[]> = {
   plus: ["M12 5v14", "M5 12h14"],
@@ -74,6 +74,7 @@ const iconPaths: Record<IconName, string[]> = {
   crown: ["m3 7 4 4 5-7 5 7 4-4-2 12H5Z", "M5 19h14"],
   grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
   restore: ["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
+  search: ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"],
 };
 
 function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
@@ -268,6 +269,7 @@ export default function DiaryApp() {
   const [authReady, setAuthReady] = useState(!supabase);
   const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
+  const [desktopQuery, setDesktopQuery] = useState("");
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressedRef = useRef(false);
   const authUserIdRef = useRef<string | null>(null);
@@ -491,6 +493,22 @@ export default function DiaryApp() {
     ? allArchiveEntries.filter(({ section: itemSection, subsection: itemSubsection }) =>
         itemSection.id === active.sectionId && itemSubsection.id === active.subsectionId)
     : allArchiveEntries;
+  const normalizedDesktopQuery = desktopQuery.trim().toLowerCase();
+  const visibleSections = normalizedDesktopQuery
+    ? data.sections
+      .map((sectionItem) => {
+        if (sectionItem.name.toLowerCase().includes(normalizedDesktopQuery)) return sectionItem;
+        return {
+          ...sectionItem,
+          subsections: sectionItem.subsections.filter((subsectionItem) =>
+            subsectionItem.name.toLowerCase().includes(normalizedDesktopQuery)
+            || subsectionItem.blocks.some((block) =>
+              `${block.title} ${block.body}`.toLowerCase().includes(normalizedDesktopQuery)),
+          ),
+        };
+      })
+      .filter((sectionItem) => sectionItem.subsections.length > 0)
+    : data.sections;
 
   const mutateSubsection = (sectionId: string, subsectionId: string, fn: (current: Subsection) => Subsection) => {
     setData((current) => ({
@@ -749,7 +767,7 @@ export default function DiaryApp() {
     }}>
       <a className="skip-link" href="#app-main">К основному содержимому</a>
       <DesktopSidebar
-        active={view === "profile" ? "profile" : view === "home" ? appMode : "notes"}
+        active={view === "profile" ? "profile" : view === "archive" ? "archive" : view === "home" ? appMode : "notes"}
         modules={modules}
         displayName={displayName}
         displayUsername={displayUsername}
@@ -762,6 +780,10 @@ export default function DiaryApp() {
           goHome();
         }}
         onProfile={() => setView("profile")}
+        onArchive={() => {
+          setArchiveScope("all");
+          setView("archive");
+        }}
       />
       {view === "home" && appMode === "notes" && modules.notes && (
         <main
@@ -774,8 +796,13 @@ export default function DiaryApp() {
           <header className="home-header">
             <div>
               <p className="eyebrow">{todayLabel()}</p>
-              <h1><span className="mobile-page-title">Дневник</span><span className="desktop-page-title">Заметки</span></h1>
+              <h1><span className="mobile-page-title">Дневник</span><span className="desktop-page-title">Дневник</span></h1>
             </div>
+            <label className="desktop-top-search">
+              <span className="visually-hidden">Поиск по дневнику</span>
+              <Icon name="search" size={19} />
+              <input value={desktopQuery} onChange={(event) => setDesktopQuery(event.target.value)} placeholder="Поиск" />
+            </label>
             <div className="header-actions">
               <button className="round-button desktop-primary-action" aria-label="Создать раздел" onClick={() => { setSheet("section"); setDraftName(""); }}>
                 <Icon name="plus" size={27} />
@@ -804,6 +831,13 @@ export default function DiaryApp() {
                 setSheet("section");
               }}><Icon name="plus" size={20} />Создать раздел</button>
             </div>
+          ) : visibleSections.length === 0 ? (
+            <div className="home-empty-state desktop-search-empty">
+              <span className="empty-state-icon"><Icon name="search" size={30} /></span>
+              <h2>Ничего не найдено</h2>
+              <p>Попробуйте изменить запрос или очистить поиск.</p>
+              <button className="secondary-button" onClick={() => setDesktopQuery("")}>Очистить поиск</button>
+            </div>
           ) : (
             <DndContext
               sensors={dragSensors}
@@ -813,9 +847,9 @@ export default function DiaryApp() {
               onDragCancel={cancelDrag}
               onDragEnd={finishSectionDrag}
             >
-              <SortableContext items={data.sections.map((item) => item.id)} strategy={rectSortingStrategy}>
+              <SortableContext items={visibleSections.map((item) => item.id)} strategy={rectSortingStrategy}>
                 <div className="section-list">
-                  {data.sections.map((sectionItem) => (
+                  {visibleSections.map((sectionItem) => (
                     <SortableSection id={sectionItem.id} key={sectionItem.id}>
                       {(sortable) => (
                         <>
@@ -1372,17 +1406,20 @@ function DesktopSidebar({
   onNotes,
   onProjects,
   onProfile,
+  onArchive,
 }: {
-  active: "notes" | "projects" | "profile";
+  active: "notes" | "projects" | "archive" | "profile";
   modules: EnabledModules;
   displayName: string;
   displayUsername: string;
   onNotes: () => void;
   onProjects: () => void;
   onProfile: () => void;
+  onArchive: () => void;
 }) {
   return (
     <aside className="desktop-sidebar" aria-label="Основная навигация">
+      <div className="desktop-window-controls" aria-hidden="true"><span /><span /><span /></div>
       <div className="desktop-brand">
         <span><Icon name="pen" size={20} /></span>
         <strong>Дневник</strong>
@@ -1399,6 +1436,12 @@ function DesktopSidebar({
             <Icon name="cube" size={20} /><span>Проекты</span>
           </button>
         )}
+        <button className={active === "archive" ? "active" : ""} aria-current={active === "archive" ? "page" : undefined} onClick={onArchive}>
+          <Icon name="archive" size={20} /><span>Архив</span>
+        </button>
+        <button className={active === "profile" ? "active" : ""} aria-current={active === "profile" ? "page" : undefined} onClick={onProfile}>
+          <Icon name="shield" size={20} /><span>Настройки</span>
+        </button>
       </nav>
       <button className={`desktop-account ${active === "profile" ? "active" : ""}`} onClick={onProfile}>
         <span className="desktop-avatar"><Icon name="user" size={20} /></span>

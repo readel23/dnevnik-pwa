@@ -1,4 +1,4 @@
-const CACHE = "diary-shell-v8";
+const CACHE = "diary-shell-v9";
 const BASE = self.registration.scope;
 const APP_SHELL = [
   BASE,
