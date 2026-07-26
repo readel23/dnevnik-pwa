@@ -1419,7 +1419,6 @@ function DesktopSidebar({
 }) {
   return (
     <aside className="desktop-sidebar" aria-label="Основная навигация">
-      <div className="desktop-window-controls" aria-hidden="true"><span /><span /><span /></div>
       <div className="desktop-brand">
         <span><Icon name="pen" size={20} /></span>
         <strong>Дневник</strong>

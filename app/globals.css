@@ -5744,6 +5744,31 @@ button:disabled {
   }
 }
 
+/* Full-screen desktop app: reference structure without a decorative window frame */
+@media (min-width: 1024px) {
+  body {
+    padding: 0;
+    background: var(--bg-elevated);
+  }
+
+  .desktop-workspace-shell {
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .desktop-sidebar {
+    padding-top: 24px;
+  }
+
+  .desktop-brand {
+    margin-top: 0;
+  }
+}
+
 /* Unified mobile workspace refinements */
 .home-header > div:first-child,
 .projects-header > div:first-child {
