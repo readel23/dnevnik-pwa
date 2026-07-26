@@ -4760,6 +4760,138 @@ button:disabled {
   }
 }
 
+/* Interaction unification */
+.project-notes-archive-link {
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 2px;
+  color: var(--success);
+  font-size: .88rem;
+  font-weight: 680;
+}
+
+.project-notes-archive-link:hover {
+  background: transparent;
+  color: color-mix(in srgb, var(--success) 82%, white 18%);
+}
+
+.project-note-swipe {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 20px;
+}
+
+.project-note-swipe.dragging {
+  z-index: 100;
+  opacity: .94;
+  filter: drop-shadow(0 22px 34px rgba(0, 0, 0, .28));
+}
+
+.project-note-swipe-action {
+  position: absolute;
+  inset-block: 0;
+  display: grid;
+  width: 170px;
+  place-content: center;
+  gap: 5px;
+  color: white;
+  font-size: .76rem;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.project-note-swipe .archive-action {
+  right: -28px;
+}
+
+.project-note-swipe .delete-action {
+  left: -28px;
+}
+
+.project-note-swipe.swiping-left .archive-action,
+.project-note-swipe.swiping-right .delete-action {
+  opacity: 1;
+}
+
+.project-note-swipe .project-note-card {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  transition: transform 210ms cubic-bezier(.16, 1, .3, 1);
+  touch-action: pan-y;
+}
+
+.project-note-swipe .project-note-meta {
+  cursor: grab;
+  touch-action: none;
+}
+
+.project-note-swipe .project-note-meta:active {
+  cursor: grabbing;
+}
+
+.project-note-actions {
+  display: none;
+}
+
+.clean-project-card .project-card-open {
+  padding-right: 16px;
+}
+
+.project-card-open {
+  grid-template-columns: 52px minmax(0, 1fr) 24px;
+}
+
+.trello-task.dragging {
+  opacity: .18;
+  box-shadow: none;
+}
+
+.trello-task-overlay {
+  width: min(320px, calc(100vw - 42px));
+  opacity: .98;
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  box-shadow: 0 20px 44px rgba(0, 0, 0, .3);
+  transform: rotate(.7deg) scale(1.015);
+  cursor: grabbing;
+}
+
+.bottom-sheet,
+.project-sheet {
+  transition: transform 230ms cubic-bezier(.16, 1, .3, 1);
+  will-change: transform;
+}
+
+.bottom-sheet.dragging,
+.project-sheet.dragging {
+  transition: none !important;
+}
+
+.modal-layer,
+.project-sheet-layer {
+  animation-duration: 170ms;
+}
+
+@media (max-width: 1023px) {
+  .home-header,
+  .projects-header {
+    padding-top: 34px;
+  }
+
+  .project-notes-header > button.project-notes-archive-link {
+    min-height: 44px;
+    border-radius: 0;
+    background: transparent;
+    padding-inline: 2px;
+    color: var(--success);
+  }
+}
+
 @keyframes desktop-dialog-in {
   from {
     opacity: 0;

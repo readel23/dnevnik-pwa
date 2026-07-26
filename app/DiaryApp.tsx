@@ -35,6 +35,7 @@ import {
   saveCloudState,
   subscribeToCloudState,
 } from "./cloud-sync";
+import { translateUiText } from "./i18n";
 
 type IconName =
   | "plus" | "user" | "more" | "chevron" | "back" | "checklist"
@@ -178,7 +179,7 @@ type Preferences = {
   reminders: boolean;
   dailySummary: boolean;
   hidePreviews: boolean;
-  language: "ru" | "en" | "kk";
+  language: "ru" | "en";
 };
 
 const defaultPreferences: Preferences = {
@@ -191,7 +192,7 @@ const defaultPreferences: Preferences = {
 
 const defaultModules: EnabledModules = {
   notes: true,
-  projects: true,
+  projects: false,
 };
 
 type UserCloudState = CloudState<AppData, Preferences, Theme>;
@@ -276,6 +277,7 @@ export default function DiaryApp() {
   const applyingCloudSignatureRef = useRef("");
   const latestCloudTimestampRef = useRef("");
   const moduleSwipeRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const appShellRef = useRef<HTMLDivElement>(null);
   const dragSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 9 } }),
@@ -477,6 +479,55 @@ export default function DiaryApp() {
     const timer = setTimeout(() => setToast(""), 3200);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const root = appShellRef.current;
+    if (!root) return;
+    document.documentElement.lang = preferences.language;
+    const originalText = new Map<Text, string>();
+    const originalAttributes = new Map<Element, Map<string, string>>();
+    const attributes = ["placeholder", "aria-label", "title"];
+
+    const translateNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textNode = node as Text;
+        if (!originalText.has(textNode)) originalText.set(textNode, textNode.data);
+        const next = translateUiText(originalText.get(textNode) || "", preferences.language);
+        if (textNode.data !== next) textNode.data = next;
+        return;
+      }
+      if (!(node instanceof Element)) return;
+      for (const attribute of attributes) {
+        const value = node.getAttribute(attribute);
+        if (!value) continue;
+        if (!originalAttributes.has(node)) originalAttributes.set(node, new Map());
+        const values = originalAttributes.get(node)!;
+        if (!values.has(attribute)) values.set(attribute, value);
+        const next = translateUiText(values.get(attribute) || "", preferences.language);
+        if (value !== next) node.setAttribute(attribute, next);
+      }
+      node.childNodes.forEach(translateNode);
+    };
+
+    translateNode(root);
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "characterData") translateNode(mutation.target);
+        mutation.addedNodes.forEach(translateNode);
+      }
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      originalText.forEach((value, node) => {
+        if (node.isConnected) node.data = value;
+      });
+      originalAttributes.forEach((values, element) => {
+        if (!element.isConnected) return;
+        values.forEach((value, attribute) => element.setAttribute(attribute, value));
+      });
+    };
+  }, [preferences.language]);
 
   const section = active ? data.sections.find((item) => item.id === active.sectionId) : undefined;
   const subsection = active ? section?.subsections.find((item) => item.id === active.subsectionId) : undefined;
@@ -762,7 +813,7 @@ export default function DiaryApp() {
   }
 
   return (
-    <div className="app-shell desktop-workspace-shell" onPointerDown={(event) => {
+    <div ref={appShellRef} className="app-shell desktop-workspace-shell" onPointerDown={(event) => {
       if (menu && !(event.target as HTMLElement).closest(".context-menu, .more-button")) setMenu(null);
     }}>
       <a className="skip-link" href="#app-main">К основному содержимому</a>
@@ -975,7 +1026,7 @@ export default function DiaryApp() {
               icon: "globe",
               label: "Язык",
               accent: "blue",
-              value: preferences.language === "ru" ? "Русский" : preferences.language === "kk" ? "Қазақша" : "English",
+              value: preferences.language === "ru" ? "Русский" : "English",
               onClick: () => setProfilePanel("language"),
             },
             { icon: "archive", label: "Архив", accent: "orange", value: allArchiveEntries.length ? String(allArchiveEntries.length) : undefined, onClick: () => {
@@ -1202,7 +1253,6 @@ export default function DiaryApp() {
                   <span className="avatar compact-avatar"><Icon name="user" size={34} /></span>
                   <div><strong>{displayName}</strong><span>{displayUsername}</span><span>{authUser.email}</span></div>
                 </div>
-                <p className="panel-copy">Почта подтверждена через Supabase. Имя и никнейм используются в профиле приложения.</p>
                 <button className="danger-button wide-button" onClick={async () => {
                   if (!supabase) return;
                   const { error } = await supabase.auth.signOut({ scope: "local" });
@@ -1257,7 +1307,6 @@ export default function DiaryApp() {
               {profilePanel === "subscription" && (
                 <>
                   <div className="plan-card"><Icon name="crown" size={32} /><div><strong>Базовый план</strong><span>Все основные функции дневника доступны бесплатно.</span></div></div>
-                  <p className="panel-copy">Синхронизация между устройствами уже включена. Изменения сохраняются в вашей защищённой базе Supabase.</p>
                 </>
               )}
               {profilePanel === "notifications" && (
@@ -1281,14 +1330,12 @@ export default function DiaryApp() {
                   <div className="toggle-list">
                     <ToggleRow label="Скрывать текст записей" value={preferences.hidePreviews} onChange={() => togglePreference("hidePreviews")} />
                   </div>
-                  <p className="panel-copy">Заметки, проекты и настройки хранятся в вашей учётной записи Supabase. На устройстве остаётся зашифрованная браузером локальная копия для работы без сети.</p>
                 </>
               )}
               {profilePanel === "language" && (
                 <div className="choice-list">
                   {([
                     ["ru", "Русский"],
-                    ["kk", "Қазақша"],
                     ["en", "English"],
                   ] as const).map(([code, label]) => (
                     <button key={code} className={`choice-row ${preferences.language === code ? "selected" : ""}`} onClick={() => {
@@ -1299,7 +1346,6 @@ export default function DiaryApp() {
                       <span>{label}</span>{preferences.language === code && <span className="choice-check">✓</span>}
                     </button>
                   ))}
-                  <p className="panel-copy">Интерфейс на казахском и английском будет переведён полностью в следующем обновлении; выбор уже сохраняется.</p>
                 </div>
               )}
               {profilePanel === "help" && (
@@ -1314,7 +1360,7 @@ export default function DiaryApp() {
                 <div className="about-panel">
                   <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
                   <h2>Дневник 1.1</h2>
-                  <p>Быстрое PWA-приложение для заметок, мыслей и проектов. Работает с телефона и устанавливается на главный экран.</p>
+                  <p>Удобное приложение для заметок, мыслей и проектов на телефоне и компьютере.</p>
                 </div>
               )}
             </PanelContent>
@@ -1506,19 +1552,18 @@ function DraggableSheet({
   onClose: () => void;
   tall?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(tall);
   const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const offsetRef = useRef(0);
   const drag = useRef<{ y: number; pointerId: number } | null>(null);
 
   const finishDrag = () => {
     if (!drag.current) return;
     const finalOffset = offsetRef.current;
-    if (finalOffset > 150 && !expanded) onClose();
-    else if (finalOffset > 90 && expanded) setExpanded(false);
-    else if (finalOffset < -55) setExpanded(true);
+    if (finalOffset > 110) onClose();
     offsetRef.current = 0;
     setOffset(0);
+    setDragging(false);
     drag.current = null;
   };
 
@@ -1533,7 +1578,7 @@ function DraggableSheet({
       }}
     >
       <section
-        className={`bottom-sheet ${expanded ? "expanded" : ""}`}
+        className={`bottom-sheet ${tall ? "expanded tall-sheet" : ""} ${dragging ? "dragging" : ""}`}
         style={{ transform: `translateY(${offset}px)` }}
         role="dialog"
         aria-modal="true"
@@ -1541,16 +1586,16 @@ function DraggableSheet({
         <button
           type="button"
           className="sheet-drag-zone"
-          aria-label={expanded ? "Свернуть панель" : "Развернуть панель"}
-          onDoubleClick={() => setExpanded((current) => !current)}
+          aria-label="Потяните вниз, чтобы закрыть"
           onPointerDown={(event) => {
             drag.current = { y: event.clientY, pointerId: event.pointerId };
+            setDragging(true);
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={(event) => {
             if (!drag.current || drag.current.pointerId !== event.pointerId) return;
             const delta = event.clientY - drag.current.y;
-            const nextOffset = Math.max(expanded ? -24 : -180, Math.min(delta, window.innerHeight * 0.72));
+            const nextOffset = Math.max(-12, Math.min(delta, window.innerHeight * 0.72));
             offsetRef.current = nextOffset;
             setOffset(nextOffset);
           }}
@@ -1645,7 +1690,7 @@ function AuthPanel({
     event.preventDefault();
     setError("");
     if (!supabase) {
-      setError("Supabase ещё не подключён. Добавьте URL проекта и publishable key.");
+      setError("Сервис входа временно недоступен. Попробуйте позже.");
       return;
     }
     if (!email.trim() || !password) {
@@ -1692,7 +1737,7 @@ function AuthPanel({
       setSubmitting(false);
       if (signUpError) {
         setError(signUpError.message.includes("Database error")
-          ? "Не удалось создать профиль. Проверьте SQL-схему Supabase или уникальность никнейма."
+          ? "Не удалось создать профиль. Попробуйте другой никнейм."
           : signUpError.message);
         return;
       }
@@ -1733,11 +1778,7 @@ function AuthPanel({
         <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
         <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Вход</button>
       </div>
-      {!isSupabaseConfigured && (
-        <div className="config-note">
-          Интерфейс готов. Для работы регистрации добавьте переменные Supabase на хостинге.
-        </div>
-      )}
+      {!isSupabaseConfigured && <div className="config-note">Сервис входа временно недоступен.</div>}
       <div className="auth-fields">
         <label>Почта<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></label>
         {mode === "register" && (

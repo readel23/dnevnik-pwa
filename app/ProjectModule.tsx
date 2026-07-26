@@ -10,6 +10,7 @@ import {
 import {
   closestCorners,
   DndContext,
+  DragOverlay,
   DragEndEvent,
   DragStartEvent,
   MouseSensor,
@@ -397,10 +398,6 @@ export default function ProjectModule({
                   <span className="project-card-copy"><strong>{project.name}</strong><small>{columns.length} групп · {done}/{tasks.length} выполнено</small></span>
                   <Icon name="chevron" size={20} />
                 </button>
-                <button className="project-card-menu-button" aria-label={`Меню проекта ${project.name}`} onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setProjectMenu({ projectId: project.id, x: Math.max(16, rect.right - 260), y: Math.min(rect.bottom + 4, window.innerHeight - 172) });
-                }}><Icon name="more" size={20} /></button>
               </article>
             );
           })}
@@ -616,6 +613,15 @@ function ProjectBoard({
           ) : <button onClick={() => setAddingColumn(true)}><Icon name="plus" size={19} />Добавить группу</button>}
         </section>
       </div>
+      <DragOverlay dropAnimation={{ duration: 190, easing: "cubic-bezier(.16, 1, .3, 1)" }}>
+        {activeTask ? (
+          <article className={`trello-task trello-task-overlay ${activeTask.done ? "done" : ""}`}>
+            <span className={`board-check ${activeTask.done ? "done" : ""}`}>{activeTask.done && <Icon name="check" size={15} />}</span>
+            <span>{activeTask.title}</span>
+            <span />
+          </article>
+        ) : null}
+      </DragOverlay>
       {activeTask && <div className="visually-hidden" aria-live="polite">Перемещается задача {activeTask.title}</div>}
     </DndContext>
   );
@@ -724,7 +730,7 @@ function ProjectNotes({
     }}>
       <div className="project-notes-header">
         <div><strong>{showArchive ? "Архив заметок" : "Заметки проекта"}</strong><span>{visibleNotes.length}</span></div>
-        <button onClick={() => setShowArchive((value) => !value)}><Icon name={showArchive ? "back" : "archive"} size={18} />{showArchive ? "К заметкам" : `Архив · ${notes.filter((note) => note.archived).length}`}</button>
+        <button className="project-notes-archive-link" onClick={() => setShowArchive((value) => !value)}>{showArchive ? "К заметкам" : `Архив${notes.some((note) => note.archived) ? ` · ${notes.filter((note) => note.archived).length}` : ""}`}</button>
       </div>
       <SortableContext items={visibleNotes.map((note) => note.id)} strategy={rectSortingStrategy}>
         <div className="project-notes-grid">
@@ -736,6 +742,7 @@ function ProjectNotes({
             onArchive={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: true } : item))}
             onRestore={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: false } : item))}
             onDelete={() => onDelete(note)}
+            haptics={haptics}
           />)}
         </div>
       </SortableContext>
@@ -752,6 +759,7 @@ function SortableProjectNote({
   onArchive,
   onRestore,
   onDelete,
+  haptics,
 }: {
   note: ProjectNote;
   archived: boolean;
@@ -759,17 +767,60 @@ function SortableProjectNote({
   onArchive: () => void;
   onRestore: () => void;
   onDelete: () => void;
+  haptics: boolean;
 }) {
   const sortable = useSortable({ id: note.id });
+  const [offset, setOffset] = useState(0);
+  const pointer = useRef<{ id: number; x: number; y: number; mode: "pending" | "swipe" | "scroll" } | null>(null);
+
+  const resetSwipe = () => {
+    pointer.current = null;
+    setOffset(0);
+  };
+
+  const finishSwipe = () => {
+    if (offset <= -86) {
+      pulse(haptics, 18);
+      if (archived) onRestore();
+      else onArchive();
+    } else if (offset >= 86) {
+      pulse(haptics, 22);
+      onDelete();
+    }
+    resetSwipe();
+  };
+
   return (
-    <article ref={sortable.setNodeRef} className={`project-note-card ${sortable.isDragging ? "dragging" : ""}`} style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }} {...sortable.attributes} {...sortable.listeners}>
-      <div className="project-note-meta"><span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span><Icon name="grip" size={17} /></div>
-      <button className="project-note-open" onPointerDown={(event) => event.stopPropagation()} onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
-      <div className="project-note-actions">
-        <button aria-label={archived ? "Восстановить заметку" : "Переместить заметку в архив"} onPointerDown={(event) => event.stopPropagation()} onClick={archived ? onRestore : onArchive}><Icon name={archived ? "restore" : "archive"} size={17} /></button>
-        <button className="danger" aria-label="Удалить заметку" onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}><Icon name="trash" size={17} /></button>
-      </div>
-    </article>
+    <div
+      ref={sortable.setNodeRef}
+      className={`project-note-swipe ${offset < 0 ? "swiping-left" : offset > 0 ? "swiping-right" : ""} ${sortable.isDragging ? "dragging" : ""}`}
+      style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+      {...sortable.attributes}
+      onPointerDown={(event) => {
+        if ((event.target as HTMLElement).closest(".project-note-meta")) return;
+        pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, mode: "pending" };
+      }}
+      onPointerMove={(event) => {
+        const current = pointer.current;
+        if (!current || current.id !== event.pointerId) return;
+        const dx = event.clientX - current.x;
+        const dy = event.clientY - current.y;
+        if (current.mode === "pending" && Math.hypot(dx, dy) > 9) {
+          current.mode = Math.abs(dx) > Math.abs(dy) * 1.15 ? "swipe" : "scroll";
+          if (current.mode === "swipe") event.currentTarget.setPointerCapture(event.pointerId);
+        }
+        if (current.mode === "swipe") setOffset(Math.max(-132, Math.min(132, dx)));
+      }}
+      onPointerUp={finishSwipe}
+      onPointerCancel={resetSwipe}
+    >
+      <div className="project-note-swipe-action archive-action"><Icon name={archived ? "restore" : "archive"} size={19} /><span>{archived ? "Восстановить" : "В архив"}</span></div>
+      <div className="project-note-swipe-action delete-action"><Icon name="trash" size={19} /><span>Удалить</span></div>
+      <article className="project-note-card" style={{ transform: `translateX(${offset}px)` }}>
+        <div className="project-note-meta" {...sortable.listeners}><span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span><Icon name="grip" size={17} /></div>
+        <button className="project-note-open" onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
+      </article>
+    </div>
   );
 }
 /* eslint-enable react-hooks/refs */
@@ -1083,6 +1134,7 @@ function SortableDocumentNode({
 
 function Sheet({ children, onClose, compact = false }: { children: ReactNode; onClose: () => void; compact?: boolean }) {
   const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const offsetRef = useRef(0);
   const drag = useRef<{ y: number; pointerId: number } | null>(null);
 
@@ -1091,6 +1143,7 @@ function Sheet({ children, onClose, compact = false }: { children: ReactNode; on
     if (offsetRef.current > 120) onClose();
     offsetRef.current = 0;
     setOffset(0);
+    setDragging(false);
     drag.current = null;
   };
 
@@ -1104,13 +1157,14 @@ function Sheet({ children, onClose, compact = false }: { children: ReactNode; on
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className={`project-sheet ${compact ? "compact-sheet" : ""}`} style={{ transform: `translateY(${offset}px)` }} role="dialog" aria-modal="true">
+      <section className={`project-sheet ${compact ? "compact-sheet" : ""} ${dragging ? "dragging" : ""}`} style={{ transform: `translateY(${offset}px)` }} role="dialog" aria-modal="true">
         <button
           type="button"
           className="sheet-grabber sheet-grabber-button"
           aria-label="Потяните вниз, чтобы закрыть"
           onPointerDown={(event) => {
             drag.current = { y: event.clientY, pointerId: event.pointerId };
+            setDragging(true);
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={(event) => {
