@@ -644,12 +644,41 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 35px;
+  min-height: 44px;
   color: var(--text-tertiary);
   font-size: 0.75rem;
   font-weight: 580;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.note-meta-actions,
+.project-note-meta-actions,
+.archive-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-copy-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text-tertiary);
+  transition: color 160ms ease, background 160ms ease, transform 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.note-copy-button:hover {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.note-copy-button:active {
+  transform: scale(.94);
 }
 
 .hold-hint {
@@ -790,7 +819,7 @@ textarea:focus {
 
 .archive-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 50px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 24px;
   padding: 23px 22px;
@@ -3895,7 +3924,7 @@ button:disabled {
 
 .project-note-meta {
   display: flex;
-  min-height: 40px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px 0;
@@ -3904,6 +3933,14 @@ button:disabled {
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
+}
+
+.project-note-meta-actions {
+  gap: 6px;
+}
+
+.project-note-meta-actions > svg {
+  flex: 0 0 auto;
 }
 
 .project-note-open {

@@ -39,6 +39,7 @@ import { createProjectFromTemplate, projectTemplates } from "./project-types";
 type Props = {
   projects: Project[];
   onChange: (projects: Project[]) => void;
+  onNotify: (message: string) => void;
   onProfile: () => void;
   onNotes: () => void;
   notesEnabled: boolean;
@@ -79,6 +80,7 @@ const paths = {
   wallet: ["M3 6a3 3 0 0 1 3-3h12v18H6a3 3 0 0 1-3-3Z", "M3 7h15", "M15 12h6v5h-6a2.5 2.5 0 0 1 0-5Z"],
   rocket: ["M14 4c4-3 7-2 7-2s1 3-2 7l-7 7-5-5Z", "m9 14-5 1 1-5", "m14 9 5 5-1 5"],
   spark: ["m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"],
+  copy: ["M9 9h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2Z", "M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"],
 } as const;
 
 type IconName = keyof typeof paths;
@@ -97,6 +99,36 @@ function uid(prefix: string) {
 
 function pulse(enabled: boolean, pattern: number | number[] = 12) {
   if (enabled && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+}
+
+async function copyPlainText(value: string) {
+  if (!value.trim() || typeof navigator === "undefined") return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the compatibility path below.
+  }
+  try {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+function noteClipboardText(note: ProjectNote) {
+  return [note.title.trim(), note.body.trim()].filter(Boolean).join("\n\n");
 }
 
 function defaultColumns(project: Project): BoardColumn[] {
@@ -126,6 +158,7 @@ function defaultColumns(project: Project): BoardColumn[] {
 export default function ProjectModule({
   projects,
   onChange,
+  onNotify,
   onProfile,
   onNotes,
   notesEnabled,
@@ -280,6 +313,7 @@ export default function ProjectModule({
           <ProjectNotes
             notes={activeProject.projectNotes || []}
             onChange={(projectNotes) => updateProject(activeProject.id, (project) => ({ ...project, projectNotes }))}
+            onNotify={onNotify}
             onEdit={setNoteDraft}
             onDelete={(note) => setConfirm({ kind: "note", projectId: activeProject.id, noteId: note.id, label: note.title || "заметку" })}
             onCreate={() => setNoteDraft({ id: uid("note"), title: "", body: "", color: "green", createdAt: new Date().toISOString() })}
@@ -706,6 +740,7 @@ function SortableBoardTask({ task, columnId, onToggle, onDelete }: { task: Board
 function ProjectNotes({
   notes,
   onChange,
+  onNotify,
   onEdit,
   onDelete,
   onCreate,
@@ -713,6 +748,7 @@ function ProjectNotes({
 }: {
   notes: ProjectNote[];
   onChange: (notes: ProjectNote[]) => void;
+  onNotify: (message: string) => void;
   onEdit: (note: ProjectNote) => void;
   onDelete: (note: ProjectNote) => void;
   onCreate: () => void;
@@ -742,6 +778,11 @@ function ProjectNotes({
             onArchive={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: true } : item))}
             onRestore={() => onChange(notes.map((item) => item.id === note.id ? { ...item, archived: false } : item))}
             onDelete={() => onDelete(note)}
+            onCopy={async () => {
+              const copied = await copyPlainText(noteClipboardText(note));
+              if (copied) pulse(haptics, 10);
+              onNotify(copied ? "Заметка скопирована" : "Не удалось скопировать заметку");
+            }}
             haptics={haptics}
           />)}
         </div>
@@ -759,6 +800,7 @@ function SortableProjectNote({
   onArchive,
   onRestore,
   onDelete,
+  onCopy,
   haptics,
 }: {
   note: ProjectNote;
@@ -767,6 +809,7 @@ function SortableProjectNote({
   onArchive: () => void;
   onRestore: () => void;
   onDelete: () => void;
+  onCopy: () => void;
   haptics: boolean;
 }) {
   const sortable = useSortable({ id: note.id });
@@ -817,7 +860,24 @@ function SortableProjectNote({
       <div className="project-note-swipe-action archive-action"><Icon name={archived ? "restore" : "archive"} size={19} /><span>{archived ? "Восстановить" : "В архив"}</span></div>
       <div className="project-note-swipe-action delete-action"><Icon name="trash" size={19} /><span>Удалить</span></div>
       <article className="project-note-card" style={{ transform: `translateX(${offset}px)` }}>
-        <div className="project-note-meta" {...sortable.listeners}><span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span><Icon name="grip" size={17} /></div>
+        <div className="project-note-meta" {...sortable.listeners}>
+          <span>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(note.createdAt))}</span>
+          <span className="project-note-meta-actions">
+            <button
+              type="button"
+              className="note-copy-button"
+              aria-label="Копировать заметку"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onCopy();
+              }}
+            >
+              <Icon name="copy" size={17} />
+            </button>
+            <Icon name="grip" size={17} />
+          </span>
+        </div>
         <button className="project-note-open" onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
       </article>
     </div>

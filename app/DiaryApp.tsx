@@ -43,7 +43,7 @@ type IconName =
   | "message" | "cart" | "clapper" | "archive" | "edit" | "trash"
   | "moon" | "globe" | "download" | "help" | "info" | "logout"
   | "bell" | "shield" | "crown" | "grip" | "restore" | "sun" | "search"
-  | "eye" | "eyeOff";
+  | "eye" | "eyeOff" | "copy";
 
 const iconPaths: Record<IconName, string[]> = {
   plus: ["M12 5v14", "M5 12h14"],
@@ -79,6 +79,7 @@ const iconPaths: Record<IconName, string[]> = {
   search: ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"],
   eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   eyeOff: ["m3 3 18 18", "M10.6 5.2A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a15.8 15.8 0 0 1-2.1 3.1", "M6.2 6.2C3.5 8.1 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.5 4.5-1.2", "M9.9 9.9a3 3 0 0 0 4.2 4.2"],
+  copy: ["M9 9h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2Z", "M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"],
 };
 
 function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
@@ -226,6 +227,36 @@ const titleColorOptions: Array<{ value: TitleColor; label: string }> = [
 
 function vibrate(pattern: number | number[] = 18) {
   if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+}
+
+async function copyPlainText(value: string) {
+  if (!value.trim() || typeof navigator === "undefined") return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the compatibility path below.
+  }
+  try {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+function noteClipboardText(title: string, body: string) {
+  return [title.trim(), body.trim()].filter(Boolean).join("\n\n");
 }
 
 function uid(prefix: string) {
@@ -988,6 +1019,7 @@ export default function DiaryApp() {
         <ProjectModule
           projects={projects}
           onChange={setProjects}
+          onNotify={setToast}
           onProfile={() => setView("profile")}
           onNotes={() => setAppMode("notes")}
           notesEnabled={modules.notes}
@@ -1098,6 +1130,11 @@ export default function DiaryApp() {
                       hidePreview={preferences.hidePreviews}
                       onArchive={() => archiveBlock(block.id)}
                       onDelete={() => setDialog({ kind: "delete-block", blockId: block.id, label: block.title || "эту запись" })}
+                      onCopy={async () => {
+                        const copied = await copyPlainText(noteClipboardText(block.title, block.body));
+                        if (copied && preferences.haptics) vibrate(10);
+                        setToast(copied ? "Заметка скопирована" : "Не удалось скопировать заметку");
+                      }}
                     />
                   ))}
                 </div>
@@ -1135,9 +1172,18 @@ export default function DiaryApp() {
                   {block.title && <h2 className={`title-${block.titleColor || "green"}`}>{block.title}</h2>}
                   <p>{preferences.hidePreviews ? "Текст скрыт настройками конфиденциальности" : block.body}</p>
                 </div>
-                <button className="round-button small" aria-label={`Восстановить ${block.title}`} onClick={() => restoreBlock(sectionItem.id, sub.id, block.id)}>
-                  <Icon name="restore" size={21} />
-                </button>
+                <div className="archive-item-actions">
+                  <button className="note-copy-button" aria-label="Копировать заметку" onClick={async () => {
+                    const copied = await copyPlainText(noteClipboardText(block.title, block.body));
+                    if (copied && preferences.haptics) vibrate(10);
+                    setToast(copied ? "Заметка скопирована" : "Не удалось скопировать заметку");
+                  }}>
+                    <Icon name="copy" size={19} />
+                  </button>
+                  <button className="round-button small" aria-label={`Восстановить ${block.title}`} onClick={() => restoreBlock(sectionItem.id, sub.id, block.id)}>
+                    <Icon name="restore" size={21} />
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -1960,11 +2006,13 @@ function SortableSwipeBlock({
   hidePreview,
   onArchive,
   onDelete,
+  onCopy,
 }: {
   block: Block;
   hidePreview: boolean;
   onArchive: () => void;
   onDelete: () => void;
+  onCopy: () => void;
 }) {
   const [offset, setOffset] = useState(0);
   const sortable = useSortable({ id: block.id });
@@ -2040,7 +2088,21 @@ function SortableSwipeBlock({
       >
         <div className="note-meta">
           <span>{block.createdAt}</span>
-          <span className="hold-hint"><Icon name="grip" size={18} />Потяните для переноса</span>
+          <span className="note-meta-actions">
+            <button
+              type="button"
+              className="note-copy-button"
+              aria-label="Копировать заметку"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onCopy();
+              }}
+            >
+              <Icon name="copy" size={18} />
+            </button>
+            <span className="hold-hint"><Icon name="grip" size={18} />Потяните для переноса</span>
+          </span>
         </div>
         {block.title && <h2 className={`title-${block.titleColor || "green"}`}>{block.title}</h2>}
         <p>{hidePreview ? "Текст скрыт настройками конфиденциальности" : block.body}</p>
