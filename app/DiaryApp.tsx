@@ -23,6 +23,7 @@ import {
   rectSortingStrategy,
   SortableContext,
   useSortable,
+  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { isSupabaseConfigured, supabase } from "./supabase";
@@ -297,6 +298,7 @@ export default function DiaryApp() {
   const [draftIcon, setDraftIcon] = useState<IconName>("folder");
   const [draftAccent, setDraftAccent] = useState("blue");
   const [draftTitleColor, setDraftTitleColor] = useState<TitleColor>("green");
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [sheetSectionId, setSheetSectionId] = useState<string | null>(null);
   const [profilePanel, setProfilePanel] = useState<ProfilePanel | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -675,19 +677,33 @@ export default function DiaryApp() {
       setToast("Подраздел добавлен");
     }
     if (sheet === "block" && active && (draftTitle.trim() || draftBody.trim())) {
-      mutateSubsection(active.sectionId, active.subsectionId, (current) => ({
-        ...current,
-        blocks: [{
-          id: uid("block"),
-          title: draftTitle.trim(),
-          body: draftBody.trim(),
-          createdAt: todayLabel(),
-          titleColor: draftTitleColor,
-        }, ...current.blocks],
-      }));
-      setToast("Запись сохранена");
+      mutateSubsection(active.sectionId, active.subsectionId, (current) => {
+        if (editingBlockId) {
+          return {
+            ...current,
+            blocks: current.blocks.map((block) => block.id === editingBlockId ? {
+              ...block,
+              title: draftTitle.trim(),
+              body: draftBody.trim(),
+              titleColor: draftTitleColor,
+            } : block),
+          };
+        }
+        return {
+          ...current,
+          blocks: [{
+            id: uid("block"),
+            title: draftTitle.trim(),
+            body: draftBody.trim(),
+            createdAt: todayLabel(),
+            titleColor: draftTitleColor,
+          }, ...current.blocks],
+        };
+      });
+      setToast(editingBlockId ? "Запись изменена" : "Запись сохранена");
     }
     setSheet(null);
+    setEditingBlockId(null);
     setMenu(null);
     setDraftName("");
     setDraftTitle("");
@@ -773,15 +789,36 @@ export default function DiaryApp() {
     if (preferences.haptics) vibrate(12);
   };
 
-  const finishSectionDrag = (event: DragEndEvent) => {
+  const finishHomeDrag = (event: DragEndEvent) => {
     document.body.classList.remove("is-reordering");
     document.getSelection()?.removeAllRanges();
     if (!event.over || event.active.id === event.over.id) return;
+    const activeId = String(event.active.id);
+    const overId = String(event.over.id);
     setData((current) => {
-      const oldIndex = current.sections.findIndex((item) => item.id === event.active.id);
-      const newIndex = current.sections.findIndex((item) => item.id === event.over?.id);
-      if (oldIndex < 0 || newIndex < 0) return current;
-      return { sections: arrayMove(current.sections, oldIndex, newIndex) };
+      if (activeId.startsWith("section:") && overId.startsWith("section:")) {
+        const activeSectionId = activeId.slice("section:".length);
+        const overSectionId = overId.slice("section:".length);
+        const oldIndex = current.sections.findIndex((item) => item.id === activeSectionId);
+        const newIndex = current.sections.findIndex((item) => item.id === overSectionId);
+        if (oldIndex < 0 || newIndex < 0) return current;
+        return { sections: arrayMove(current.sections, oldIndex, newIndex) };
+      }
+      if (activeId.startsWith("subsection:") && overId.startsWith("subsection:")) {
+        const [, activeSectionId, activeSubsectionId] = activeId.split(":");
+        const [, overSectionId, overSubsectionId] = overId.split(":");
+        if (!activeSectionId || activeSectionId !== overSectionId) return current;
+        return {
+          sections: current.sections.map((sectionItem) => {
+            if (sectionItem.id !== activeSectionId) return sectionItem;
+            const oldIndex = sectionItem.subsections.findIndex((item) => item.id === activeSubsectionId);
+            const newIndex = sectionItem.subsections.findIndex((item) => item.id === overSubsectionId);
+            if (oldIndex < 0 || newIndex < 0) return sectionItem;
+            return { ...sectionItem, subsections: arrayMove(sectionItem.subsections, oldIndex, newIndex) };
+          }),
+        };
+      }
+      return current;
     });
     if (preferences.haptics) vibrate(12);
   };
@@ -930,12 +967,12 @@ export default function DiaryApp() {
               autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }}
               onDragStart={beginDrag}
               onDragCancel={cancelDrag}
-              onDragEnd={finishSectionDrag}
+              onDragEnd={finishHomeDrag}
             >
-              <SortableContext items={visibleSections.map((item) => item.id)} strategy={rectSortingStrategy}>
+              <SortableContext items={visibleSections.map((item) => `section:${item.id}`)} strategy={rectSortingStrategy}>
                 <div className="section-list">
                   {visibleSections.map((sectionItem) => (
-                    <SortableSection id={sectionItem.id} key={sectionItem.id}>
+                    <SortableSection id={`section:${sectionItem.id}`} key={sectionItem.id}>
                       {(sortable) => (
                         <>
                           <div className="section-heading">
@@ -982,25 +1019,47 @@ export default function DiaryApp() {
                                 <Icon name="plus" size={20} />
                                 Добавить первый подраздел
                               </button>
-                            ) : sectionItem.subsections.map((sub, index) => (
-                              <button
-                                className="subsection-row"
-                                key={sub.id}
-                                onContextMenu={(event) => event.preventDefault()}
-                                onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
-                                onPointerUp={() => {
-                                  stopLongPress();
-                                  if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
-                                }}
-                                onPointerCancel={stopLongPress}
-                                onPointerLeave={stopLongPress}
+                            ) : (
+                              <SortableContext
+                                items={sectionItem.subsections.map((sub) => `subsection:${sectionItem.id}:${sub.id}`)}
+                                strategy={verticalListSortingStrategy}
                               >
-                                <span className={`tile-icon ${sub.accent}`}><Icon name={sub.icon} size={23} /></span>
-                                <span className="row-label">{sub.name}</span>
-                                <Icon name="chevron" size={22} />
-                                {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
-                              </button>
-                            ))}
+                                {sectionItem.subsections.map((sub, index) => (
+                                  <SortableSubsection id={`subsection:${sectionItem.id}:${sub.id}`} key={sub.id}>
+                                    {(sortable) => (
+                                      <div className="subsection-row">
+                                        <button
+                                          className="subsection-open-button"
+                                          onContextMenu={(event) => event.preventDefault()}
+                                          onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
+                                          onPointerUp={() => {
+                                            stopLongPress();
+                                            if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
+                                          }}
+                                          onPointerCancel={stopLongPress}
+                                          onPointerLeave={stopLongPress}
+                                        >
+                                          <span className={`tile-icon ${sub.accent}`}><Icon name={sub.icon} size={23} /></span>
+                                          <span className="row-label">{sub.name}</span>
+                                          {sub.blocks.length > 0
+                                            ? <span className="subsection-note-count" aria-label={`${sub.blocks.length} заметок`}>{sub.blocks.length}</span>
+                                            : <Icon name="chevron" size={22} />}
+                                        </button>
+                                        <button
+                                          className="subsection-drag-handle"
+                                          aria-label={`Переместить подраздел ${sub.name}`}
+                                          {...sortable.attributes}
+                                          {...sortable.listeners}
+                                        >
+                                          <Icon name="grip" size={18} />
+                                        </button>
+                                        {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
+                                      </div>
+                                    )}
+                                  </SortableSubsection>
+                                ))}
+                              </SortableContext>
+                            )}
                             </div>
                           </div>
                         </>
@@ -1011,7 +1070,7 @@ export default function DiaryApp() {
               </SortableContext>
             </DndContext>
           )}
-          {data.sections.length > 0 && <p className="gesture-hint">Удерживайте подраздел для меню · перетаскивайте разделы за точки</p>}
+          {data.sections.length > 0 && <p className="gesture-hint">Удерживайте подраздел для меню · перетаскивайте разделы и подразделы за точки</p>}
         </main>
       )}
 
@@ -1110,7 +1169,13 @@ export default function DiaryApp() {
               <span className="empty-state-icon"><Icon name="pen" size={31} /></span>
               <h2>Начните с первой записи</h2>
               <p>Запишите мысль, план или список дел. Заголовок можно оставить пустым.</p>
-              <button className="primary-button" onClick={() => setSheet("block")}><Icon name="plus" size={20} />Создать запись</button>
+              <button className="primary-button" onClick={() => {
+                setEditingBlockId(null);
+                setDraftTitle("");
+                setDraftBody("");
+                setDraftTitleColor("green");
+                setSheet("block");
+              }}><Icon name="plus" size={20} />Создать запись</button>
             </div>
           ) : (
             <DndContext
@@ -1130,6 +1195,13 @@ export default function DiaryApp() {
                       hidePreview={preferences.hidePreviews}
                       onArchive={() => archiveBlock(block.id)}
                       onDelete={() => setDialog({ kind: "delete-block", blockId: block.id, label: block.title || "эту запись" })}
+                      onEdit={() => {
+                        setEditingBlockId(block.id);
+                        setDraftTitle(block.title);
+                        setDraftBody(block.body);
+                        setDraftTitleColor(block.titleColor || "green");
+                        setSheet("block");
+                      }}
                       onCopy={async () => {
                         const copied = await copyPlainText(noteClipboardText(block.title, block.body));
                         if (copied && preferences.haptics) vibrate(10);
@@ -1142,6 +1214,7 @@ export default function DiaryApp() {
             </DndContext>
           )}
           <button className="floating-add" aria-label="Создать запись" onClick={() => {
+            setEditingBlockId(null);
             setDraftTitle("");
             setDraftBody("");
             setDraftTitleColor("green");
@@ -1232,11 +1305,17 @@ export default function DiaryApp() {
       )}
 
       {sheet && (
-        <DraggableSheet onClose={() => setSheet(null)} tall={sheet === "block"}>
+        <DraggableSheet onClose={() => {
+          setSheet(null);
+          setEditingBlockId(null);
+        }} tall={sheet === "block"}>
           <form className="sheet-form" onSubmit={submitSheet}>
             <div className="sheet-header">
-              <button type="button" className="text-button muted-action" onClick={() => setSheet(null)}>Отмена</button>
-              <strong>{sheet === "block" ? todayLabel() : sheet === "section" ? "Новый раздел" : "Новый подраздел"}</strong>
+              <button type="button" className="text-button muted-action" onClick={() => {
+                setSheet(null);
+                setEditingBlockId(null);
+              }}>Отмена</button>
+              <strong>{sheet === "block" ? editingBlockId ? "Редактировать запись" : todayLabel() : sheet === "section" ? "Новый раздел" : "Новый подраздел"}</strong>
               <button className="text-button" type="submit">Готово</button>
             </div>
             {sheet === "block" ? (
@@ -1570,6 +1649,30 @@ function SortableSection({
     >
       {children({ attributes: sortable.attributes, listeners: sortable.listeners })}
     </section>
+  );
+}
+
+function SortableSubsection({
+  id,
+  children,
+}: {
+  id: string;
+  children: (sortable: SortableRenderState) => ReactNode;
+}) {
+  const sortable = useSortable({ id });
+  const style = {
+    transform: CSS.Translate.toString(sortable.transform),
+    transition: sortable.transition,
+  };
+
+  return (
+    <div
+      ref={sortable.setNodeRef}
+      style={style}
+      className={`sortable-subsection ${sortable.isDragging ? "is-dragging" : ""}`}
+    >
+      {children({ attributes: sortable.attributes, listeners: sortable.listeners })}
+    </div>
   );
 }
 /* eslint-enable react-hooks/refs */
@@ -2006,12 +2109,14 @@ function SortableSwipeBlock({
   hidePreview,
   onArchive,
   onDelete,
+  onEdit,
   onCopy,
 }: {
   block: Block;
   hidePreview: boolean;
   onArchive: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onCopy: () => void;
 }) {
   const [offset, setOffset] = useState(0);
@@ -2038,6 +2143,8 @@ function SortableSwipeBlock({
     } else if (currentGesture === "swipe" && currentOffset >= 88) {
       vibrate(20);
       onDelete();
+    } else if (currentGesture === "pending" && !sortable.isDragging) {
+      onEdit();
     }
     reset();
   };
@@ -2085,6 +2192,12 @@ function SortableSwipeBlock({
         }}
         onPointerUp={finish}
         onPointerCancel={reset}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && !sortable.isDragging) {
+            event.preventDefault();
+            onEdit();
+          }
+        }}
       >
         <div className="note-meta">
           <span>{block.createdAt}</span>
