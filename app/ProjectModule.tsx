@@ -41,6 +41,7 @@ type Props = {
   onChange: (projects: Project[]) => void;
   onNotify: (message: string) => void;
   onProfile: () => void;
+  onSearch: () => void;
   onNotes: () => void;
   notesEnabled: boolean;
   haptics: boolean;
@@ -159,6 +160,7 @@ export default function ProjectModule({
   onChange,
   onNotify,
   onProfile,
+  onSearch,
   onNotes,
   notesEnabled,
   haptics,
@@ -397,6 +399,7 @@ export default function ProjectModule({
       <header className="projects-header">
         <div><p className="eyebrow">Рабочее пространство</p><h1>Проекты</h1></div>
         <div className="header-actions">
+          <button className="round-button mobile-search-action" aria-label="Поиск по заметкам" onClick={onSearch}><Icon name="search" size={23} /></button>
           <button className="round-button desktop-primary-action" aria-label="Создать проект" onClick={() => setCreateOpen(true)}><Icon name="plus" size={27} /><span>Новый проект</span></button>
           <button className="round-button mobile-profile-action" aria-label="Открыть профиль" onClick={onProfile}><Icon name="user" size={26} /></button>
         </div>

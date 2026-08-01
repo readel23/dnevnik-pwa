@@ -44,7 +44,7 @@ type IconName =
   | "message" | "cart" | "clapper" | "archive" | "edit" | "trash"
   | "moon" | "globe" | "download" | "help" | "info" | "logout"
   | "bell" | "shield" | "crown" | "restore" | "sun" | "search"
-  | "eye" | "eyeOff" | "copy";
+  | "eye" | "eyeOff" | "copy" | "close";
 
 const iconPaths: Record<IconName, string[]> = {
   plus: ["M12 5v14", "M5 12h14"],
@@ -80,6 +80,7 @@ const iconPaths: Record<IconName, string[]> = {
   eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   eyeOff: ["m3 3 18 18", "M10.6 5.2A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a15.8 15.8 0 0 1-2.1 3.1", "M6.2 6.2C3.5 8.1 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.5 4.5-1.2", "M9.9 9.9a3 3 0 0 0 4.2 4.2"],
   copy: ["M9 9h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2Z", "M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"],
+  close: ["m6 6 12 12", "m18 6-12 12"],
 };
 
 function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
@@ -106,6 +107,16 @@ type Block = {
   body: string;
   createdAt: string;
   titleColor?: TitleColor;
+};
+
+type SearchHit = {
+  id: string;
+  kind: "subsection" | "block";
+  sectionId: string;
+  subsectionId: string;
+  sectionName: string;
+  subsectionName: string;
+  block?: Block;
 };
 
 type TitleColor = "green" | "blue" | "purple" | "orange" | "pink" | "neutral";
@@ -173,6 +184,7 @@ const initialData: AppData = {
 };
 
 const storageKey = "diary-pwa-state-v1";
+const noteDraftStorageKey = `${storageKey}-note-draft`;
 const cloudCacheKey = "diary-pwa-cloud-state-v2";
 const legacyOwnerKey = "diary-pwa-legacy-owner";
 const themes = ["dark", "light", "system"] as const;
@@ -291,6 +303,9 @@ export default function DiaryApp() {
     label?: string;
   } | null>(null);
   const [toast, setToast] = useState("");
+  const [undoToast, setUndoToast] = useState<{ message: string; run: () => void } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [draftName, setDraftName] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
@@ -514,6 +529,41 @@ export default function DiaryApp() {
   }, [toast]);
 
   useEffect(() => {
+    if (!undoToast) return;
+    const timer = setTimeout(() => setUndoToast(null), 5600);
+    return () => clearTimeout(timer);
+  }, [undoToast]);
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+      if (event.key === "Escape") setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || sheet !== "block" || editingBlockId || !active) return;
+    const timer = setTimeout(() => {
+      if (!draftTitle.trim() && !draftBody.trim()) {
+        localStorage.removeItem(noteDraftStorageKey);
+        return;
+      }
+      localStorage.setItem(noteDraftStorageKey, JSON.stringify({
+        active,
+        title: draftTitle,
+        body: draftBody,
+        color: draftTitleColor,
+      }));
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [active, draftBody, draftTitle, draftTitleColor, editingBlockId, hydrated, sheet]);
+
+  useEffect(() => {
     const root = appShellRef.current;
     if (!root) return;
     document.documentElement.lang = preferences.language;
@@ -593,6 +643,36 @@ export default function DiaryApp() {
       })
       .filter((sectionItem) => sectionItem.subsections.length > 0)
     : data.sections;
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const searchHits: SearchHit[] = data.sections.flatMap((sectionItem) =>
+    sectionItem.subsections.flatMap((subsectionItem) => {
+      const hits: SearchHit[] = [];
+      if (normalizedSearchQuery && `${sectionItem.name} ${subsectionItem.name}`.toLowerCase().includes(normalizedSearchQuery)) {
+        hits.push({
+          id: `subsection-${subsectionItem.id}`,
+          kind: "subsection",
+          sectionId: sectionItem.id,
+          subsectionId: subsectionItem.id,
+          sectionName: sectionItem.name,
+          subsectionName: subsectionItem.name,
+        });
+      }
+      subsectionItem.blocks.forEach((block) => {
+        if (!normalizedSearchQuery || `${block.title} ${block.body} ${sectionItem.name} ${subsectionItem.name}`.toLowerCase().includes(normalizedSearchQuery)) {
+          hits.push({
+            id: `block-${block.id}`,
+            kind: "block",
+            sectionId: sectionItem.id,
+            subsectionId: subsectionItem.id,
+            sectionName: sectionItem.name,
+            subsectionName: subsectionItem.name,
+            block,
+          });
+        }
+      });
+      return hits;
+    }),
+  ).slice(0, normalizedSearchQuery ? 30 : 8);
 
   const mutateSubsection = (sectionId: string, subsectionId: string, fn: (current: Subsection) => Subsection) => {
     setData((current) => ({
@@ -601,6 +681,54 @@ export default function DiaryApp() {
         subsections: sectionItem.subsections.map((subsectionItem) => subsectionItem.id === subsectionId ? fn(subsectionItem) : subsectionItem),
       }),
     }));
+  };
+
+  const openNewBlockEditor = () => {
+    if (!active) return;
+    setEditingBlockId(null);
+    let restored = false;
+    try {
+      const rawDraft = localStorage.getItem(noteDraftStorageKey);
+      if (rawDraft) {
+        const saved = JSON.parse(rawDraft) as {
+          active?: { sectionId?: string; subsectionId?: string };
+          title?: string;
+          body?: string;
+          color?: TitleColor;
+        };
+        if (saved.active?.sectionId === active.sectionId && saved.active?.subsectionId === active.subsectionId) {
+          setDraftTitle(saved.title || "");
+          setDraftBody(saved.body || "");
+          setDraftTitleColor(saved.color || "green");
+          restored = Boolean(saved.title?.trim() || saved.body?.trim());
+        }
+      }
+    } catch {
+      localStorage.removeItem(noteDraftStorageKey);
+    }
+    if (!restored) {
+      setDraftTitle("");
+      setDraftBody("");
+      setDraftTitleColor("green");
+    } else {
+      setToast("Черновик восстановлен");
+    }
+    setSheet("block");
+  };
+
+  const openSearchHit = (hit: SearchHit) => {
+    setActive({ sectionId: hit.sectionId, subsectionId: hit.subsectionId });
+    setView("subsection");
+    setSearchOpen(false);
+    setSearchQuery("");
+    if (hit.kind === "block" && hit.block) {
+      setEditingBlockId(hit.block.id);
+      setDraftTitle(hit.block.title);
+      setDraftBody(hit.block.body);
+      setDraftTitleColor(hit.block.titleColor || "green");
+      setSheet("block");
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const openSubsection = (sectionId: string, subsectionId: string) => {
@@ -680,6 +808,7 @@ export default function DiaryApp() {
         };
       });
       setToast(editingBlockId ? "Запись изменена" : "Запись сохранена");
+      localStorage.removeItem(noteDraftStorageKey);
     }
     setSheet(null);
     setEditingBlockId(null);
@@ -725,20 +854,49 @@ export default function DiaryApp() {
 
   const archiveBlock = (blockId: string) => {
     if (!active) return;
-    mutateSubsection(active.sectionId, active.subsectionId, (current) => {
-      const target = current.blocks.find((item) => item.id === blockId);
+    const location = { ...active };
+    const target = subsection?.blocks.find((item) => item.id === blockId);
+    const previousIndex = subsection?.blocks.findIndex((item) => item.id === blockId) ?? 0;
+    if (!target) return;
+    mutateSubsection(location.sectionId, location.subsectionId, (current) => {
       return target ? { ...current, blocks: current.blocks.filter((item) => item.id !== blockId), archived: [target, ...current.archived] } : current;
     });
-    setToast("Запись перемещена в архив");
+    setToast("");
+    setUndoToast({
+      message: "Запись перемещена в архив",
+      run: () => {
+        mutateSubsection(location.sectionId, location.subsectionId, (current) => {
+          if (current.blocks.some((item) => item.id === target.id)) return current;
+          const blocks = [...current.blocks];
+          blocks.splice(Math.min(previousIndex, blocks.length), 0, target);
+          return { ...current, blocks, archived: current.archived.filter((item) => item.id !== target.id) };
+        });
+      },
+    });
   };
 
   const deleteBlock = (blockId: string) => {
     if (!active) return;
-    mutateSubsection(active.sectionId, active.subsectionId, (current) => ({
+    const location = { ...active };
+    const target = subsection?.blocks.find((item) => item.id === blockId);
+    const previousIndex = subsection?.blocks.findIndex((item) => item.id === blockId) ?? 0;
+    if (!target) return;
+    mutateSubsection(location.sectionId, location.subsectionId, (current) => ({
       ...current,
       blocks: current.blocks.filter((item) => item.id !== blockId),
     }));
-    setToast("Запись удалена");
+    setToast("");
+    setUndoToast({
+      message: "Запись удалена",
+      run: () => {
+        mutateSubsection(location.sectionId, location.subsectionId, (current) => {
+          if (current.blocks.some((item) => item.id === target.id)) return current;
+          const blocks = [...current.blocks];
+          blocks.splice(Math.min(previousIndex, blocks.length), 0, target);
+          return { ...current, blocks };
+        });
+      },
+    });
   };
 
   const restoreBlock = (sectionId: string, subsectionId: string, blockId: string) => {
@@ -905,6 +1063,9 @@ export default function DiaryApp() {
               <input value={desktopQuery} onChange={(event) => setDesktopQuery(event.target.value)} placeholder="Поиск" />
             </label>
             <div className="header-actions">
+              <button className="round-button mobile-search-action" aria-label="Поиск по заметкам" onClick={() => setSearchOpen(true)}>
+                <Icon name="search" size={23} />
+              </button>
               <button className="round-button desktop-primary-action" aria-label="Создать раздел" onClick={() => { setSheet("section"); setDraftName(""); }}>
                 <Icon name="plus" size={27} />
                 <span>Новый раздел</span>
@@ -1056,6 +1217,7 @@ export default function DiaryApp() {
           onChange={setProjects}
           onNotify={setToast}
           onProfile={() => setView("profile")}
+          onSearch={() => setSearchOpen(true)}
           onNotes={() => setAppMode("notes")}
           notesEnabled={modules.notes}
           haptics={preferences.haptics}
@@ -1189,13 +1351,7 @@ export default function DiaryApp() {
               </SortableContext>
             </DndContext>
           )}
-          <button className="floating-add" aria-label="Создать запись" onClick={() => {
-            setEditingBlockId(null);
-            setDraftTitle("");
-            setDraftBody("");
-            setDraftTitleColor("green");
-            setSheet("block");
-          }}>
+          <button className="floating-add" aria-label="Создать запись" onClick={openNewBlockEditor}>
             <Icon name="plus" size={29} />
           </button>
         </main>
@@ -1237,6 +1393,50 @@ export default function DiaryApp() {
             ))}
           </div>
         </main>
+      )}
+
+      {searchOpen && (
+        <div className="spotlight-layer" role="presentation" onClick={(event) => {
+          if (event.target === event.currentTarget) setSearchOpen(false);
+        }}>
+          <section className="spotlight-panel" role="dialog" aria-modal="true" aria-label="Поиск по заметкам">
+            <div className="spotlight-search-row">
+              <Icon name="search" size={21} />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Найти заметку или подраздел"
+                aria-label="Поиск по заметкам"
+              />
+              <button type="button" aria-label="Закрыть поиск" onClick={() => setSearchOpen(false)}><Icon name="close" size={20} /></button>
+            </div>
+            <div className="spotlight-caption">
+              <span>{normalizedSearchQuery ? "Результаты" : "Быстрый доступ"}</span>
+              <kbd>Esc</kbd>
+            </div>
+            <div className="spotlight-results" role="list">
+              {searchHits.map((hit) => (
+                <button type="button" role="listitem" className="spotlight-result" key={hit.id} onClick={() => openSearchHit(hit)}>
+                  <span className={`spotlight-result-icon ${hit.kind}`}><Icon name={hit.kind === "block" ? "pen" : "folder"} size={19} /></span>
+                  <span className="spotlight-result-copy">
+                    <strong>{hit.kind === "block" ? hit.block?.title || hit.block?.body.split("\n")[0] || "Заметка" : hit.subsectionName}</strong>
+                    <small>{hit.sectionName} · {hit.subsectionName}</small>
+                    {hit.kind === "block" && hit.block?.title && hit.block.body && <span>{hit.block.body}</span>}
+                  </span>
+                  <Icon name="chevron" size={18} />
+                </button>
+              ))}
+              {!searchHits.length && (
+                <div className="spotlight-empty">
+                  <span><Icon name="search" size={25} /></span>
+                  <strong>{normalizedSearchQuery ? "Ничего не найдено" : "Заметок пока нет"}</strong>
+                  <p>{normalizedSearchQuery ? "Попробуйте другое слово или название подраздела." : "Создайте первую заметку — она появится здесь."}</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       )}
 
       {menu && (
@@ -1457,7 +1657,8 @@ export default function DiaryApp() {
                   <p><strong>Перенос:</strong> удерживайте любую точку записи, затем двигайте вверх или вниз.</p>
                   <p><strong>Архив:</strong> смахните запись влево.</p>
                   <p><strong>Удаление:</strong> смахните вправо и подтвердите действие.</p>
-                  <p><strong>Меню подраздела:</strong> удерживайте строку подраздела.</p>
+                  <p><strong>Меню подраздела:</strong> нажмите троеточие справа.</p>
+                  <p><strong>Поиск:</strong> нажмите лупу или используйте Ctrl/⌘ + K.</p>
                 </div>
               )}
               {profilePanel === "about" && (
@@ -1514,7 +1715,18 @@ export default function DiaryApp() {
         </div>
       )}
 
-      {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {undoToast ? (
+        <div className="toast undo-toast" role="status">
+          <span>✓</span>
+          <strong>{undoToast.message}</strong>
+          <button type="button" onClick={() => {
+            undoToast.run();
+            setUndoToast(null);
+            setToast("Действие отменено");
+            if (preferences.haptics) vibrate(10);
+          }}>Отменить</button>
+        </div>
+      ) : toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     </div>
   );
 }
