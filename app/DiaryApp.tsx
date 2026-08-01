@@ -43,7 +43,7 @@ type IconName =
   | "folder" | "cube" | "pen" | "train" | "heart" | "bulb"
   | "message" | "cart" | "clapper" | "archive" | "edit" | "trash"
   | "moon" | "globe" | "download" | "help" | "info" | "logout"
-  | "bell" | "shield" | "crown" | "grip" | "restore" | "sun" | "search"
+  | "bell" | "shield" | "crown" | "restore" | "sun" | "search"
   | "eye" | "eyeOff" | "copy";
 
 const iconPaths: Record<IconName, string[]> = {
@@ -75,7 +75,6 @@ const iconPaths: Record<IconName, string[]> = {
   bell: ["M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9", "M10 21h4"],
   shield: ["M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z", "M12 8v4", "M12 16h.01"],
   crown: ["m3 7 4 4 5-7 5 7 4-4-2 12H5Z", "M5 19h14"],
-  grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
   restore: ["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
   search: ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"],
   eye: ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
@@ -307,8 +306,6 @@ export default function DiaryApp() {
   const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [desktopQuery, setDesktopQuery] = useState("");
-  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressedRef = useRef(false);
   const authUserIdRef = useRef<string | null>(null);
   const applyingCloudSignatureRef = useRef("");
   const latestCloudTimestampRef = useRef("");
@@ -636,24 +633,6 @@ export default function DiaryApp() {
     setMenu({ ...payload, ...position });
   };
 
-  const startLongPress = (event: ReactPointerEvent<HTMLButtonElement>, sectionId: string, subsectionId: string) => {
-    longPressedRef.current = false;
-    const x = event.clientX;
-    const y = event.clientY;
-    longPressRef.current = setTimeout(() => {
-      longPressedRef.current = true;
-      if (preferences.haptics) vibrate(25);
-      const position = menuPosition(x - 140, y + 14, 2);
-      setMenu({ type: "subsection", sectionId, subsectionId, ...position });
-      document.getSelection()?.removeAllRanges();
-    }, 340);
-  };
-
-  const stopLongPress = () => {
-    if (longPressRef.current) clearTimeout(longPressRef.current);
-    longPressRef.current = null;
-  };
-
   const submitSheet = (event: FormEvent) => {
     event.preventDefault();
     if (sheet === "section" && draftName.trim()) {
@@ -976,7 +955,14 @@ export default function DiaryApp() {
                       {(sortable) => (
                         <>
                           <div className="section-heading">
-                            <h2>{sectionItem.name}</h2>
+                            <button
+                              className="section-title-drag-zone"
+                              aria-label={`Переместить раздел ${sectionItem.name}`}
+                              {...sortable.attributes}
+                              {...sortable.listeners}
+                            >
+                              <span>{sectionItem.name}</span>
+                            </button>
                             <button
                               className={`section-collapse-button ${collapsedSections.has(sectionItem.id) ? "collapsed" : ""}`}
                               aria-label={`${collapsedSections.has(sectionItem.id) ? "Развернуть" : "Свернуть"} раздел ${sectionItem.name}`}
@@ -989,14 +975,6 @@ export default function DiaryApp() {
                               })}
                             >
                               <Icon name="chevron" size={19} />
-                            </button>
-                            <button
-                              className="section-drag-handle"
-                              aria-label={`Переместить раздел ${sectionItem.name}`}
-                              {...sortable.attributes}
-                              {...sortable.listeners}
-                            >
-                              <Icon name="grip" size={20} />
                             </button>
                             <button
                               className="icon-button more-button"
@@ -1027,17 +1005,15 @@ export default function DiaryApp() {
                                 {sectionItem.subsections.map((sub, index) => (
                                   <SortableSubsection id={`subsection:${sectionItem.id}:${sub.id}`} key={sub.id}>
                                     {(sortable) => (
-                                      <div className="subsection-row">
+                                      <div
+                                        className="subsection-row"
+                                        {...sortable.attributes}
+                                        {...sortable.listeners}
+                                        onContextMenu={(event) => event.preventDefault()}
+                                      >
                                         <button
                                           className="subsection-open-button"
-                                          onContextMenu={(event) => event.preventDefault()}
-                                          onPointerDown={(event) => startLongPress(event, sectionItem.id, sub.id)}
-                                          onPointerUp={() => {
-                                            stopLongPress();
-                                            if (!longPressedRef.current) openSubsection(sectionItem.id, sub.id);
-                                          }}
-                                          onPointerCancel={stopLongPress}
-                                          onPointerLeave={stopLongPress}
+                                          onClick={() => openSubsection(sectionItem.id, sub.id)}
                                         >
                                           <span className={`tile-icon ${sub.accent}`}><Icon name={sub.icon} size={23} /></span>
                                           <span className="row-label">{sub.name}</span>
@@ -1046,12 +1022,12 @@ export default function DiaryApp() {
                                             : <Icon name="chevron" size={22} />}
                                         </button>
                                         <button
-                                          className="subsection-drag-handle"
-                                          aria-label={`Переместить подраздел ${sub.name}`}
-                                          {...sortable.attributes}
-                                          {...sortable.listeners}
+                                          className="subsection-more-button"
+                                          aria-label={`Меню подраздела ${sub.name}`}
+                                          aria-expanded={menu?.type === "subsection" && menu.sectionId === sectionItem.id && menu.subsectionId === sub.id}
+                                          onPointerDown={(event) => showMenu(event, { type: "subsection", sectionId: sectionItem.id, subsectionId: sub.id })}
                                         >
-                                          <Icon name="grip" size={18} />
+                                          <Icon name="more" size={20} />
                                         </button>
                                         {index < sectionItem.subsections.length - 1 && <span className="row-divider" />}
                                       </div>
@@ -1070,7 +1046,7 @@ export default function DiaryApp() {
               </SortableContext>
             </DndContext>
           )}
-          {data.sections.length > 0 && <p className="gesture-hint">Удерживайте подраздел для меню · перетаскивайте разделы и подразделы за точки</p>}
+          {data.sections.length > 0 && <p className="gesture-hint">Удерживайте раздел, подраздел или заметку, чтобы изменить порядок</p>}
         </main>
       )}
 
@@ -2125,6 +2101,7 @@ function SortableSwipeBlock({
   const offsetRef = useRef(0);
   const pointerId = useRef<number | null>(null);
   const gesture = useRef<"pending" | "swipe" | "scroll" | null>(null);
+  const ignoreClick = useRef(false);
   const { onPointerDown: sortablePointerDown, ...sortableListeners } = sortable.listeners || {};
 
   const reset = () => {
@@ -2143,8 +2120,6 @@ function SortableSwipeBlock({
     } else if (currentGesture === "swipe" && currentOffset >= 88) {
       vibrate(20);
       onDelete();
-    } else if (currentGesture === "pending" && !sortable.isDragging) {
-      onEdit();
     }
     reset();
   };
@@ -2169,8 +2144,13 @@ function SortableSwipeBlock({
         {...sortable.attributes}
         {...sortableListeners}
         onContextMenu={(event) => event.preventDefault()}
+        onClick={() => {
+          if (!ignoreClick.current && !sortable.isDragging) onEdit();
+          ignoreClick.current = false;
+        }}
         onPointerDown={(event) => {
           if (event.pointerType === "mouse" && event.button !== 0) return;
+          ignoreClick.current = false;
           sortablePointerDown?.(event);
           start.current = { x: event.clientX, y: event.clientY };
           pointerId.current = event.pointerId;
@@ -2181,6 +2161,7 @@ function SortableSwipeBlock({
           const dx = event.clientX - start.current.x;
           const dy = event.clientY - start.current.y;
           if (gesture.current === "pending" && Math.hypot(dx, dy) > 9) {
+            ignoreClick.current = true;
             gesture.current = Math.abs(dx) > Math.abs(dy) * 1.15 ? "swipe" : "scroll";
             if (gesture.current === "swipe") event.currentTarget.setPointerCapture(event.pointerId);
           }
@@ -2191,7 +2172,10 @@ function SortableSwipeBlock({
           }
         }}
         onPointerUp={finish}
-        onPointerCancel={reset}
+        onPointerCancel={() => {
+          ignoreClick.current = true;
+          reset();
+        }}
         onKeyDown={(event) => {
           if ((event.key === "Enter" || event.key === " ") && !sortable.isDragging) {
             event.preventDefault();
@@ -2214,7 +2198,6 @@ function SortableSwipeBlock({
             >
               <Icon name="copy" size={18} />
             </button>
-            <span className="hold-hint"><Icon name="grip" size={18} />Потяните для переноса</span>
           </span>
         </div>
         {block.title && <h2 className={`title-${block.titleColor || "green"}`}>{block.title}</h2>}

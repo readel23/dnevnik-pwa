@@ -68,7 +68,6 @@ const paths = {
   board: ["M4 4h6v16H4Z", "M14 4h6v9h-6Z"],
   note: ["M5 3h10l4 4v14H5Z", "M15 3v5h5", "M8 13h8"],
   check: ["m5 12 4 4L19 6"],
-  grip: ["M8 7h.01", "M16 7h.01", "M8 12h.01", "M16 12h.01", "M8 17h.01", "M16 17h.01"],
   trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 14h10l1-14"],
   edit: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z", "m14.5 7.5 3 3"],
   archive: ["M4 7h16", "M5 7v13h14V7", "M3 3h18v4H3Z", "M10 12h4"],
@@ -875,7 +874,6 @@ function SortableProjectNote({
             >
               <Icon name="copy" size={17} />
             </button>
-            <Icon name="grip" size={17} />
           </span>
         </div>
         <button className="project-note-open" onClick={onEdit}>{note.title && <h2 className={`title-${note.color}`}>{note.title}</h2>}<p>{note.body}</p></button>
@@ -1175,7 +1173,6 @@ function SortableDocumentNode({
           {document.type === "folder" ? <span className="document-disclosure" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(document.id); }}><Icon name={expanded.has(document.id) ? "down" : "chevron"} size={16} /></span> : <span />}
           <Icon name={document.type === "folder" ? "folder" : "page"} size={18} />
           <span>{document.title || "Без названия"}</span>
-          <Icon name="grip" size={16} />
         </button>
         <details onPointerDown={(event) => event.stopPropagation()}>
           <summary aria-label={`Меню ${document.title}`}><Icon name="more" size={18} /></summary>

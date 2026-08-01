@@ -6980,3 +6980,143 @@ button:disabled {
     font-size: .73rem;
   }
 }
+
+/* Handle-free, touch-first reordering */
+.section-heading {
+  grid-template-columns: minmax(0, 1fr) 46px 46px;
+}
+
+.section-title-drag-zone {
+  display: flex;
+  min-width: 0;
+  min-height: 46px;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 14px;
+  background: transparent;
+  padding: 0 10px 0 2px;
+  color: var(--text-secondary);
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -.025em;
+  cursor: grab;
+  touch-action: pan-y;
+  transition: background 160ms ease, color 160ms ease, transform 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.section-title-drag-zone span {
+  overflow: hidden;
+  font-size: inherit;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-title-drag-zone:hover {
+  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+  color: var(--text);
+}
+
+.section-title-drag-zone:active {
+  transform: scale(.988);
+  cursor: grabbing;
+}
+
+.section-title-drag-zone:focus-visible,
+.subsection-more-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: -3px;
+}
+
+.subsection-row {
+  cursor: grab;
+  touch-action: pan-y;
+  transition: background 160ms ease, opacity 160ms ease;
+}
+
+.subsection-row:active {
+  cursor: grabbing;
+}
+
+.subsection-more-button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-self: center;
+  place-items: center;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 150ms ease, color 150ms ease, transform 150ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.subsection-more-button:hover {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.subsection-more-button:active {
+  transform: scale(.94);
+}
+
+.note-block {
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.project-note-meta,
+.document-node-main {
+  cursor: grab;
+}
+
+.project-note-card {
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.project-note-meta {
+  touch-action: none;
+}
+
+.document-node-main {
+  grid-template-columns: 22px 22px minmax(0, 1fr);
+}
+
+.project-note-meta:active,
+.document-node-main:active {
+  cursor: grabbing;
+}
+
+@media (max-width: 480px) {
+  .section-heading {
+    grid-template-columns: minmax(0, 1fr) 42px 42px;
+  }
+
+  .section-title-drag-zone {
+    min-height: 42px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .section-title-drag-zone {
+    min-height: 38px;
+    color: var(--text-secondary);
+    font-size: .91rem;
+  }
+
+  .section-collapse-button,
+  .section-heading .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-title-drag-zone,
+  .subsection-row,
+  .subsection-more-button {
+    transition: none;
+  }
+}
