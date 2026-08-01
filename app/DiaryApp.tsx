@@ -12,7 +12,9 @@ import type { User } from "@supabase/supabase-js";
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   DragEndEvent,
+  DragStartEvent,
   MouseSensor,
   TouchSensor,
   useSensor,
@@ -321,6 +323,7 @@ export default function DiaryApp() {
   const [archiveScope, setArchiveScope] = useState<"active" | "all">("all");
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [desktopQuery, setDesktopQuery] = useState("");
+  const [activeHomeDragId, setActiveHomeDragId] = useState<string | null>(null);
   const authUserIdRef = useRef<string | null>(null);
   const applyingCloudSignatureRef = useRef("");
   const latestCloudTimestampRef = useRef("");
@@ -913,6 +916,11 @@ export default function DiaryApp() {
     if (preferences.haptics) vibrate(24);
   };
 
+  const beginHomeDrag = (event: DragStartEvent) => {
+    setActiveHomeDragId(String(event.active.id));
+    beginDrag();
+  };
+
   const finishBlockDrag = (event: DragEndEvent) => {
     document.body.classList.remove("is-reordering");
     document.getSelection()?.removeAllRanges();
@@ -929,6 +937,7 @@ export default function DiaryApp() {
   const finishHomeDrag = (event: DragEndEvent) => {
     document.body.classList.remove("is-reordering");
     document.getSelection()?.removeAllRanges();
+    setActiveHomeDragId(null);
     if (!event.over || event.active.id === event.over.id) return;
     const activeId = String(event.active.id);
     const overId = String(event.over.id);
@@ -963,6 +972,7 @@ export default function DiaryApp() {
   const cancelDrag = () => {
     document.body.classList.remove("is-reordering");
     document.getSelection()?.removeAllRanges();
+    setActiveHomeDragId(null);
   };
 
   const confirmDelete = () => {
@@ -1105,7 +1115,7 @@ export default function DiaryApp() {
               sensors={dragSensors}
               collisionDetection={closestCenter}
               autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }}
-              onDragStart={beginDrag}
+              onDragStart={beginHomeDrag}
               onDragCancel={cancelDrag}
               onDragEnd={finishHomeDrag}
             >
@@ -1205,6 +1215,9 @@ export default function DiaryApp() {
                   ))}
                 </div>
               </SortableContext>
+              <DragOverlay dropAnimation={{ duration: 210, easing: "cubic-bezier(.16, 1, .3, 1)" }}>
+                {activeHomeDragId && <HomeDragPreview id={activeHomeDragId} data={data} />}
+              </DragOverlay>
             </DndContext>
           )}
           {data.sections.length > 0 && <p className="gesture-hint">Удерживайте раздел, подраздел или заметку, чтобы изменить порядок</p>}
@@ -1825,7 +1838,7 @@ function SortableSection({
 }) {
   const sortable = useSortable({ id });
   const style = {
-    transform: CSS.Translate.toString(sortable.transform),
+    transform: sortable.isDragging ? undefined : CSS.Translate.toString(sortable.transform),
     transition: sortable.transition,
   };
 
@@ -1849,7 +1862,7 @@ function SortableSubsection({
 }) {
   const sortable = useSortable({ id });
   const style = {
-    transform: CSS.Translate.toString(sortable.transform),
+    transform: sortable.isDragging ? undefined : CSS.Translate.toString(sortable.transform),
     transition: sortable.transition,
   };
 
@@ -1864,6 +1877,34 @@ function SortableSubsection({
   );
 }
 /* eslint-enable react-hooks/refs */
+
+function HomeDragPreview({ id, data }: { id: string; data: AppData }) {
+  if (id.startsWith("section:")) {
+    const sectionItem = data.sections.find((item) => item.id === id.slice("section:".length));
+    if (!sectionItem) return null;
+    const noteCount = sectionItem.subsections.reduce((total, item) => total + item.blocks.length, 0);
+    return (
+      <div className="home-drag-preview section-preview">
+        <span className="home-drag-preview-icon"><Icon name="folder" size={21} /></span>
+        <span><strong>{sectionItem.name}</strong><small>Подразделы: {sectionItem.subsections.length} · Заметки: {noteCount}</small></span>
+      </div>
+    );
+  }
+
+  if (id.startsWith("subsection:")) {
+    const [, sectionId, subsectionId] = id.split(":");
+    const subsectionItem = data.sections.find((item) => item.id === sectionId)?.subsections.find((item) => item.id === subsectionId);
+    if (!subsectionItem) return null;
+    return (
+      <div className="home-drag-preview subsection-preview">
+        <span className={`tile-icon ${subsectionItem.accent}`}><Icon name={subsectionItem.icon} size={22} /></span>
+        <span><strong>{subsectionItem.name}</strong><small>{subsectionItem.blocks.length ? `Заметки: ${subsectionItem.blocks.length}` : "Пока без заметок"}</small></span>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 type SettingRow = { icon: IconName; label: string; accent: string; value?: string; onClick?: () => void };
 
