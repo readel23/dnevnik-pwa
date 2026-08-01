@@ -11,6 +11,7 @@ import {
 import type { User } from "@supabase/supabase-js";
 import {
   closestCenter,
+  type CollisionDetection,
   DndContext,
   DragOverlay,
   DragEndEvent,
@@ -283,6 +284,21 @@ function todayLabel() {
     .replace(/^./, (letter) => letter.toUpperCase());
 }
 
+const homeCollisionDetection: CollisionDetection = (args) => {
+  const activeId = String(args.active.id);
+  let droppableContainers = args.droppableContainers;
+
+  if (activeId.startsWith("section:")) {
+    droppableContainers = droppableContainers.filter((container) => String(container.id).startsWith("section:"));
+  } else if (activeId.startsWith("subsection:")) {
+    const [, sectionId] = activeId.split(":");
+    const subsectionPrefix = `subsection:${sectionId}:`;
+    droppableContainers = droppableContainers.filter((container) => String(container.id).startsWith(subsectionPrefix));
+  }
+
+  return closestCenter({ ...args, droppableContainers });
+};
+
 export default function DiaryApp() {
   const [data, setData] = useState<AppData>({ sections: [] });
   const [projects, setProjects] = useState<Project[]>(emptyProjects);
@@ -330,8 +346,8 @@ export default function DiaryApp() {
   const moduleSwipeRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const appShellRef = useRef<HTMLDivElement>(null);
   const dragSensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 9 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 105, tolerance: 7 } }),
   );
 
   useEffect(() => {
@@ -1113,13 +1129,13 @@ export default function DiaryApp() {
           ) : (
             <DndContext
               sensors={dragSensors}
-              collisionDetection={closestCenter}
+              collisionDetection={homeCollisionDetection}
               autoScroll={{ threshold: { x: 0.12, y: 0.18 }, acceleration: 12, interval: 5 }}
               onDragStart={beginHomeDrag}
               onDragCancel={cancelDrag}
               onDragEnd={finishHomeDrag}
             >
-              <SortableContext items={visibleSections.map((item) => `section:${item.id}`)} strategy={rectSortingStrategy}>
+              <SortableContext items={visibleSections.map((item) => `section:${item.id}`)} strategy={verticalListSortingStrategy}>
                 <div className="section-list">
                   {visibleSections.map((sectionItem) => (
                     <SortableSection id={`section:${sectionItem.id}`} key={sectionItem.id}>
